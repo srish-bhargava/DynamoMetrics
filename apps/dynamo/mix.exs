@@ -28,6 +28,7 @@ defmodule Dynamo.MixProject do
       {:emulation, in_umbrella: true},
       {:dialyxir, "~> 1.0", only: [:dev], runtime: false},
       {:credo, "~> 1.4", only: [:dev, :test], runtime: false},
+      {:ex_hash_ring, "~> 3.0"},
       {:statistics, "~> 0.6.2"}
     ]
   end
