@@ -38,6 +38,7 @@ defmodule DynamoNode do
   """
   def start(id, store, nodes, n, r, w) do
     Logger.info("Starting node #{inspect(id)}")
+    Logger.metadata(id: id)
 
     state = %DynamoNode{
       id: id,

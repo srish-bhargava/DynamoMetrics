@@ -10,5 +10,9 @@
 import Config
 
 config :logger, :console,
-  metadata: [:state, :name],
-  level: :warn
+  metadata: [:id],
+  level: :info,
+  format: "$time: $metadata-> $message\n",
+  compile_time_purge_matching: [
+    [application: :emulation]
+  ]
