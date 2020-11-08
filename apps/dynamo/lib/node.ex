@@ -1,4 +1,4 @@
-defmodule Node do
+defmodule DynamoNode do
   @moduledoc """
   A replica node in a dynamo cluster.
   """
