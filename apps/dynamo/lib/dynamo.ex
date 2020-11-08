@@ -11,10 +11,13 @@ defmodule Dynamo do
   require Fuzzers
   require Logger
 
-  def start(data, nodes, N, R, W) do
+  @doc """
+  Start a dynamo cluster.
+  """
+  def start(data, nodes, n, r, w) do
     Enum.each(nodes, fn node ->
       spawn(node, fn ->
-        DynamoNode.start(id: node, store: data, nodes: nodes, N: N, R: R, W: W)
+        DynamoNode.start(node, data, nodes, n, r, w)
       end)
     end)
   end
