@@ -1,18 +1,21 @@
 defmodule Dynamo do
   @moduledoc """
-  Documentation for `Dynamo`.
+  Simplified implementation of Amazon's Dynamo DB.
   """
+  # override Kernel's functions with Emulation's
+  import Emulation, only: [spawn: 2, send: 2, timer: 1, now: 0, whoami: 0]
 
-  @doc """
-  Hello world.
+  import Kernel,
+    except: [spawn: 3, spawn: 1, spawn_link: 1, spawn_link: 3, send: 2]
 
-  ## Examples
+  require Fuzzers
+  require Logger
 
-      iex> Dynamo.hello()
-      :world
-
-  """
-  def hello do
-    :world
+  def start(data, nodes, N, R, W) do
+    Enum.each(nodes, fn node ->
+      spawn(node, fn ->
+        DynamoNode.start(id: node, store: data, nodes: nodes, N: N, R: R, W: W)
+      end)
+    end)
   end
 end
