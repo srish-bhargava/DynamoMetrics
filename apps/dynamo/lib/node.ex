@@ -78,7 +78,25 @@ defmodule DynamoNode do
 
         raise "TODO"
 
-      # internal requests
+      # redirects from other nodes
+      {node, {:redirect, {client, {:get, key}}}} ->
+        Logger.info(
+          "Received a redirect from #{inspect(node)} for a :get request " <>
+            "for key=#{inspect(key)} from client=#{inspect(client)}"
+        )
+
+        raise "TODO"
+
+      {node, {:redirect, {client, {:put, key, value}}}} ->
+        Logger.info(
+          "Received a redirect from #{inspect(node)} for a :get request " <>
+            "for key=#{inspect(key)}, value=#{inspect(value)} " <>
+            "from client=#{inspect(client)}"
+        )
+
+        raise "TODO"
+
+      # coordinator requests
       {coordinator, {:get_internal, key}} ->
         Logger.info(
           "Received a :get_internal request for key=#{inspect(key)} " <>
