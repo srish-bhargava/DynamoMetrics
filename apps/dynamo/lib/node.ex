@@ -57,6 +57,22 @@ defmodule DynamoNode do
   end
 
   @doc """
+  Get the preference list for a particular key
+  (i.e. the top `n` nodes in the ring for this key).
+  """
+  def get_preference_list(state, key) do
+    HashRing.find_nodes(state.ring, key, state.n)
+  end
+
+  @doc """
+  Get the coordinator for a particular key
+  (i.e. the top node in the ring for this key).
+  """
+  def get_coordinator(state, key) do
+    HashRing.find_node(state.ring, key)
+  end
+
+  @doc """
   Listen and serve requests, forever.
   """
   def listener(state) do
