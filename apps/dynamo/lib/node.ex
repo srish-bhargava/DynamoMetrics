@@ -113,7 +113,7 @@ defmodule DynamoNode do
         raise "TODO"
 
       # coordinator requests
-      {coordinator, {:get_internal, key}} ->
+      {coordinator, {:get_internal_request, key}} ->
         Logger.info(
           "Received a :get_internal request for key=#{inspect(key)} " <>
             "from coordinator=#{inspect(coordinator)}"
@@ -121,11 +121,27 @@ defmodule DynamoNode do
 
         raise "TODO"
 
-      {coordinator, {:put_internal, key, value, clock}} ->
+      {coordinator, {:put_internal_request, key, value, clock}} ->
         Logger.info(
           "Received a :put_internal request for key=#{inspect(key)}, " <>
             "value=#{inspect(value)}, clock=#{inspect(clock)} from " <>
             "coordinator=#{inspect(coordinator)}"
+        )
+
+      # node responses to coordinator requests
+      {node, {:get_internal_response, key, value, clock}} ->
+        Logger.info(
+          "Received a :get_internal response for key=#{inspect(key)}, " <>
+            "value=#{inspect(value)}, clock=#{inspect(clock)} from " <>
+            "node=#{inspect(node)}"
+        )
+
+        raise "TODO"
+
+      {node, {:put_internal_response, key}} ->
+        Logger.info(
+          "Received a :put_internal response for key=#{inspect(key)} from " <>
+            "node=#{inspect(node)}"
         )
 
         raise "TODO"
