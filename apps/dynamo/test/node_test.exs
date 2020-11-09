@@ -7,6 +7,102 @@ defmodule DynamoNodeTest do
   import Kernel,
     except: [spawn: 3, spawn: 1, spawn_link: 1, spawn_link: 3, send: 2]
 
+  describe "No crashes" do
+    test "during startup of a single node" do
+      Emulation.init()
+
+      handle =
+        Process.monitor(
+          spawn(:node, fn ->
+            DynamoNode.start(:node, %{}, [:node], 1, 1, 1)
+          end)
+        )
+
+      receive do
+        {:DOWN, ^handle, _, proc, reason} ->
+          assert false, "node #{inspect(proc)} crashed (reason: #{reason})"
+      after
+        5_000 ->
+          true
+      end
+    after
+      Emulation.terminate()
+    end
+
+    test "during startup of multiple nodes" do
+      Emulation.init()
+      nodes = [:a, :b, :c]
+
+      for node <- nodes do
+        Process.monitor(
+          spawn(node, fn ->
+            DynamoNode.start(node, %{}, nodes, 1, 1, 1)
+          end)
+        )
+      end
+
+      receive do
+        {:DOWN, _handle, _, proc, reason} ->
+          assert false, "node #{inspect(proc)} crashed (reason: #{reason})"
+      after
+        5_000 ->
+          true
+      end
+    after
+      Emulation.terminate()
+    end
+
+    test "on a get request" do
+      Emulation.init()
+      nodes = [:a, :b, :c]
+
+      for node <- nodes do
+        Process.monitor(
+          spawn(node, fn ->
+            DynamoNode.start(node, %{foo: 42}, nodes, 1, 1, 1)
+          end)
+        )
+      end
+
+      send(:a, %ClientRequest.Get{key: :foo})
+
+      receive do
+        {:DOWN, _handle, _, proc, reason} ->
+          assert false, "node #{inspect(proc)} crashed (reason: #{reason})"
+      after
+        5_000 ->
+          true
+      end
+    after
+      Emulation.terminate()
+    end
+
+    test "on a put request" do
+      Emulation.init()
+      nodes = [:a, :b, :c]
+
+      for node <- nodes do
+        Process.monitor(
+          spawn(node, fn ->
+            DynamoNode.start(node, %{foo: 42}, nodes, 1, 1, 1)
+          end)
+        )
+      end
+
+      send(:a, %ClientRequest.Put{key: :foo, value: 49})
+
+      receive do
+        {:DOWN, _handle, _, proc, reason} ->
+          assert false, "node #{inspect(proc)} crashed (reason: #{reason})"
+      after
+        5_000 ->
+          true
+      end
+    after
+      Emulation.terminate()
+    end
+  end
+
   test "First get request returns the initial value" do
     Emulation.init()
 
