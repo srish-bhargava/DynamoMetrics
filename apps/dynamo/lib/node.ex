@@ -76,6 +76,7 @@ defmodule DynamoNode do
   Listen and serve requests, forever.
   """
   def listener(state) do
+    # TODO figure out when we should update vector_clock
     receive do
       # client requests
       {client, {:get, key}} ->
@@ -84,7 +85,15 @@ defmodule DynamoNode do
             "from client=#{inspect(client)}"
         )
 
-        raise "TODO"
+        coordinator = get_coordinator(state, key)
+
+        if coordinator != state.id do
+          # we are not the coordinator, so redirect to them
+          send(coordinator, {:redirect, {client, {:get, key}}})
+        else
+          # we are the coordinator, so process the request
+          get_as_coordinator(state, key)
+        end
 
       {client, {:put, key, value}} ->
         Logger.info(
@@ -92,7 +101,15 @@ defmodule DynamoNode do
             "value=#{inspect(value)} from client=#{inspect(client)}"
         )
 
-        raise "TODO"
+        coordinator = get_coordinator(state, key)
+
+        if coordinator != state.id do
+          # we are not the coordinator, so redirect to them
+          send(coordinator, {:redirect, {client, {:put, key, value}}})
+        else
+          # we are the coordinator, so process the request
+          put_as_coordinator(state, key, value)
+        end
 
       # redirects from other nodes
       {node, {:redirect, {client, {:get, key}}}} ->
@@ -101,7 +118,8 @@ defmodule DynamoNode do
             "for key=#{inspect(key)} from client=#{inspect(client)}"
         )
 
-        raise "TODO"
+        # we must be the coordinator for this key
+        get_as_coordinator(state, key)
 
       {node, {:redirect, {client, {:put, key, value}}}} ->
         Logger.info(
@@ -110,7 +128,8 @@ defmodule DynamoNode do
             "from client=#{inspect(client)}"
         )
 
-        raise "TODO"
+        # we must be the coordinator for this key
+        put_as_coordinator(state, key, value)
 
       # coordinator requests
       {coordinator, {:get_internal_request, key}} ->
@@ -127,6 +146,8 @@ defmodule DynamoNode do
             "value=#{inspect(value)}, clock=#{inspect(clock)} from " <>
             "coordinator=#{inspect(coordinator)}"
         )
+
+        raise "TODO"
 
       # node responses to coordinator requests
       {node, {:get_internal_response, key, value, clock}} ->
@@ -152,7 +173,7 @@ defmodule DynamoNode do
 
   @doc """
   Respond to a :get request for `key`,
-  ASSUMING we are the co-ordinator for this key.
+  assuming we are the co-ordinator for this key.
 
   Steps:
   1. Request all versions of data from the top `n` nodes in
@@ -162,13 +183,18 @@ defmodule DynamoNode do
   3. Return all latest concurrent versions of the key's values
        received.
   """
-  def get(state, key) do
+  def get_as_coordinator(state, key) do
+    # This function should return immediately, and not keep the
+    # receive loop waiting while we get all `r` responses.
+    # Thus we probably need to spawn another process.
+    # Such a process would not need to share any state with this one,
+    # aside from the ring.
     raise "TODO get"
   end
 
   @doc """
   Respond to a :put request for `key`,
-  ASSUMING we are the co-ordinator for this key.
+  assuming we are the co-ordinator for this key.
 
   Steps:
   1. Increment vector_clock
@@ -179,7 +205,7 @@ defmodule DynamoNode do
   5. If (w - 1) responses received, return success,
        otherwise failure.
   """
-  def put(state, key, value) do
+  def put_as_coordinator(state, key, value) do
     raise "TODO put"
   end
 end
