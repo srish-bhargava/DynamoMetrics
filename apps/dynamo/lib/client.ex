@@ -28,7 +28,7 @@ defmodule Client do
   Contact a node to insert/replace the value of a key.
   """
   def put(node, key, value) do
-    send(node, %ClientRequest.put(){
+    send(node, %ClientRequest.Put{
       key: key,
       value: value
     })

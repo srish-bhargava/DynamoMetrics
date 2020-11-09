@@ -154,8 +154,7 @@ defmodule DynamoNode do
 
       {node,
        %CoordinatorResponse.Put{
-         key: key,
-         values: values
+         key: key
        } = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
 
