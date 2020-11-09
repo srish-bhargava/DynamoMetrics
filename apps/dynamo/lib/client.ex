@@ -11,10 +11,16 @@ defmodule Client do
   Contact a node to get the value of a key.
   """
   def get(node, key) do
-    send(node, {:get, key})
+    send(node, %ClientRequest.Get{
+      key: key
+    })
 
     receive do
-      {_node, result} -> result
+      {_node,
+       %ClientResponse.Get{
+         key: ^key
+       } = msg} ->
+        msg
     end
   end
 
@@ -22,10 +28,17 @@ defmodule Client do
   Contact a node to insert/replace the value of a key.
   """
   def put(node, key, value) do
-    send(node, {:put, key, value})
+    send(node, %ClientRequest.put(){
+      key: key,
+      value: value
+    })
 
     receive do
-      {_node, result} -> result
+      {_node,
+       %ClientResponse.Put{
+         key: ^key
+       } = msg} ->
+        msg
     end
   end
 end

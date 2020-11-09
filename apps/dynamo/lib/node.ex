@@ -79,91 +79,85 @@ defmodule DynamoNode do
     # TODO figure out when we should update vector_clock
     receive do
       # client requests
-      {client, {:get, key}} ->
-        Logger.info(
-          "Received a :get request for key=#{inspect(key)} " <>
-            "from client=#{inspect(client)}"
-        )
+      {client, %ClientRequest.Get{key: key} = msg} ->
+        Logger.info("Received #{inspect(msg)} from #{inspect(client)}")
 
         coordinator = get_coordinator(state, key)
 
         if coordinator != state.id do
           # we are not the coordinator, so redirect to them
-          send(coordinator, {:redirect, {client, {:get, key}}})
+          send(coordinator, %RedirectedClientRequest{client: client, request: msg})
         else
           # we are the coordinator, so process the request
           get_as_coordinator(state, key)
         end
 
-      {client, {:put, key, value}} ->
-        Logger.info(
-          "Received a :put request for key=#{inspect(key)}, " <>
-            "value=#{inspect(value)} from client=#{inspect(client)}"
-        )
+      {client, %ClientRequest.Put{key: key, value: value} = msg} ->
+        Logger.info("Received #{inspect(msg)} from #{inspect(client)}")
 
         coordinator = get_coordinator(state, key)
 
         if coordinator != state.id do
           # we are not the coordinator, so redirect to them
-          send(coordinator, {:redirect, {client, {:put, key, value}}})
+          send(coordinator, %RedirectedClientRequest{client: client, request: msg})
         else
           # we are the coordinator, so process the request
           put_as_coordinator(state, key, value)
         end
 
       # redirects from other nodes
-      {node, {:redirect, {client, {:get, key}}}} ->
-        Logger.info(
-          "Received a redirect from #{inspect(node)} for a :get request " <>
-            "for key=#{inspect(key)} from client=#{inspect(client)}"
-        )
+      {node,
+       %RedirectedClientRequest{
+         client: client,
+         request: %ClientRequest.Get{key: key}
+       } = msg} ->
+        Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
 
         # we must be the coordinator for this key
         get_as_coordinator(state, key)
 
-      {node, {:redirect, {client, {:put, key, value}}}} ->
-        Logger.info(
-          "Received a redirect from #{inspect(node)} for a :get request " <>
-            "for key=#{inspect(key)}, value=#{inspect(value)} " <>
-            "from client=#{inspect(client)}"
-        )
+      {node,
+       %RedirectedClientRequest{
+         client: client,
+         request: %ClientRequest.Put{key: key, value: value}
+       } = msg} ->
+        Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
 
         # we must be the coordinator for this key
         put_as_coordinator(state, key, value)
 
       # coordinator requests
-      {coordinator, {:get_internal_request, key}} ->
-        Logger.info(
-          "Received a :get_internal request for key=#{inspect(key)} " <>
-            "from coordinator=#{inspect(coordinator)}"
-        )
+      {coordinator, %CoordinatorRequest.Get{key: key} = msg} ->
+        Logger.info("Received #{inspect(msg)} from #{inspect(coordinator)}")
 
         raise "TODO"
 
-      {coordinator, {:put_internal_request, key, value, clock}} ->
-        Logger.info(
-          "Received a :put_internal request for key=#{inspect(key)}, " <>
-            "value=#{inspect(value)}, clock=#{inspect(clock)} from " <>
-            "coordinator=#{inspect(coordinator)}"
-        )
+      {coordinator,
+       %CoordinatorRequest.Put{
+         key: key,
+         value: value,
+         clock: clock
+       } = msg} ->
+        Logger.info("Received #{inspect(msg)} from #{inspect(coordinator)}")
 
         raise "TODO"
 
       # node responses to coordinator requests
-      {node, {:get_internal_response, key, value, clock}} ->
-        Logger.info(
-          "Received a :get_internal response for key=#{inspect(key)}, " <>
-            "value=#{inspect(value)}, clock=#{inspect(clock)} from " <>
-            "node=#{inspect(node)}"
-        )
+      {node,
+       %CoordinatorResponse.Get{
+         key: key,
+         values: values
+       } = msg} ->
+        Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
 
         raise "TODO"
 
-      {node, {:put_internal_response, key}} ->
-        Logger.info(
-          "Received a :put_internal response for key=#{inspect(key)} from " <>
-            "node=#{inspect(node)}"
-        )
+      {node,
+       %CoordinatorResponse.Put{
+         key: key,
+         values: values
+       } = msg} ->
+        Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
 
         raise "TODO"
     end
@@ -172,7 +166,7 @@ defmodule DynamoNode do
   end
 
   @doc """
-  Respond to a :get request for `key`,
+  Respond to a `get` request for `key`,
   assuming we are the co-ordinator for this key.
 
   Steps:
@@ -193,7 +187,7 @@ defmodule DynamoNode do
   end
 
   @doc """
-  Respond to a :put request for `key`,
+  Respond to a `put` request for `key`,
   assuming we are the co-ordinator for this key.
 
   Steps:
