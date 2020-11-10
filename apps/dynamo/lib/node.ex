@@ -80,7 +80,7 @@ defmodule DynamoNode do
     # TODO figure out when we should update vector_clock
     receive do
       # client requests
-      {client, %ClientRequest.Get{nonce: nonce, key: key} = msg} ->
+      {client, %ClientRequest.Get{key: key} = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(client)}")
 
         coordinator = get_coordinator(state, key)
@@ -95,11 +95,11 @@ defmodule DynamoNode do
           listener(state)
         else
           # we are the coordinator, so process the request
-          state = get_as_coordinator(state, key)
+          state = get_as_coordinator(state, client, msg)
           listener(state)
         end
 
-      {client, %ClientRequest.Put{nonce: nonce, key: key, value: value} = msg} ->
+      {client, %ClientRequest.Put{key: key} = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(client)}")
 
         coordinator = get_coordinator(state, key)
@@ -114,7 +114,7 @@ defmodule DynamoNode do
           listener(state)
         else
           # we are the coordinator, so process the request
-          state = put_as_coordinator(state, key, value)
+          state = put_as_coordinator(state, client, msg)
           listener(state)
         end
 
@@ -122,23 +122,23 @@ defmodule DynamoNode do
       {node,
        %RedirectedClientRequest{
          client: client,
-         request: %ClientRequest.Get{key: key}
+         request: %ClientRequest.Get{} = orig_msg
        } = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
 
         # we must be the coordinator for this key
-        state = get_as_coordinator(state, key)
+        state = get_as_coordinator(state, client, orig_msg)
         listener(state)
 
       {node,
        %RedirectedClientRequest{
          client: client,
-         request: %ClientRequest.Put{nonce: nonce, key: key, value: value}
+         request: %ClientRequest.Put{} = orig_msg
        } = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
 
         # we must be the coordinator for this key
-        state = put_as_coordinator(state, key, value)
+        state = put_as_coordinator(state, client, orig_msg)
         listener(state)
 
       # coordinator requests
@@ -185,8 +185,8 @@ defmodule DynamoNode do
   end
 
   @doc """
-  Respond to a `get` request for `key`,
-  assuming we are the co-ordinator for this key.
+  Respond to `client`'s `get` request, assuming we are
+  the co-ordinator for the requested key.
 
   Steps:
   1. Request all versions of data from the top `n` nodes in
@@ -196,7 +196,7 @@ defmodule DynamoNode do
   3. Return all latest concurrent versions of the key's values
        received.
   """
-  def get_as_coordinator(state, key) do
+  def get_as_coordinator(state, client, msg) do
     # This function should return immediately, and not keep the
     # receive loop waiting while we get all `r` responses.
     # Thus we probably need to spawn another process.
@@ -206,8 +206,8 @@ defmodule DynamoNode do
   end
 
   @doc """
-  Respond to a `put` request for `key`,
-  assuming we are the co-ordinator for this key.
+  Respond to `client`'s `put` request, assuming we are
+  the co-ordinator for the requested key.
 
   Steps:
   1. Increment vector_clock
@@ -218,7 +218,7 @@ defmodule DynamoNode do
   5. If (w - 1) responses received, return success,
        otherwise failure.
   """
-  def put_as_coordinator(state, key, value) do
+  def put_as_coordinator(state, client, msg) do
     raise "TODO put"
   end
 
