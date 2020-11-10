@@ -90,9 +90,12 @@ defmodule DynamoNode do
             client: client,
             request: msg
           })
+
+          listener(state)
         else
           # we are the coordinator, so process the request
-          get_as_coordinator(state, key)
+          state = get_as_coordinator(state, key)
+          listener(state)
         end
 
       {client, %ClientRequest.Put{key: key, value: value} = msg} ->
@@ -106,9 +109,12 @@ defmodule DynamoNode do
             client: client,
             request: msg
           })
+
+          listener(state)
         else
           # we are the coordinator, so process the request
-          put_as_coordinator(state, key, value)
+          state = put_as_coordinator(state, key, value)
+          listener(state)
         end
 
       # redirects from other nodes
@@ -120,7 +126,8 @@ defmodule DynamoNode do
         Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
 
         # we must be the coordinator for this key
-        get_as_coordinator(state, key)
+        state = get_as_coordinator(state, key)
+        listener(state)
 
       {node,
        %RedirectedClientRequest{
@@ -130,13 +137,16 @@ defmodule DynamoNode do
         Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
 
         # we must be the coordinator for this key
-        put_as_coordinator(state, key, value)
+        state = put_as_coordinator(state, key, value)
+        listener(state)
 
       # coordinator requests
       {coordinator, %CoordinatorRequest.Get{key: key} = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(coordinator)}")
 
-        raise "TODO"
+        values = Map.get(state.store, key)
+        send(coordinator, %CoordinatorResponse.Get{key: key, values: values})
+        listener(state)
 
       {coordinator,
        %CoordinatorRequest.Put{
@@ -166,8 +176,6 @@ defmodule DynamoNode do
 
         raise "TODO"
     end
-
-    listener(state)
   end
 
   @doc """
