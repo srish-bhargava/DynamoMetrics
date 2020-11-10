@@ -6,7 +6,7 @@ defmodule DynamoNode do
   alias ExHashRing.HashRing
 
   # override Kernel's functions with Emulation's
-  import Emulation, only: [spawn: 2, send: 2, timer: 1, now: 0, whoami: 0]
+  import Emulation, only: [send: 2, timer: 2]
 
   import Kernel,
     except: [spawn: 3, spawn: 1, spawn_link: 1, spawn_link: 3, send: 2]
@@ -30,6 +30,25 @@ defmodule DynamoNode do
     n: nil,
     r: nil,
     w: nil,
+    # pending client get requests being handled
+    # by this node as coordinator.
+    # `pending_gets` is of the form:
+    # %{client_nonce => %{client: client, responses: %{node => values}}}
+    # Importantly, if a request has been dispatched to other nodes
+    # but no coordinator responses have been received yet, then the
+    # appropriate client_nonce WILL BE PRESENT and will map to {client, %{}}.
+    # This helps distinguish this case with the case when an enough
+    # responses have already been received and client_nonce purged
+    # from this map.
+    pending_gets: nil,
+    # pending client put requests being handled
+    # by this node as coordinator.
+    # `pending_puts` is of the form:
+    # %{client_nonce => %{client: client, responses: [node]}}
+    # Similar to `pending_gets`, a request that's pending but for which
+    # no coordinator responses have been received yet WILL have its
+    # client_nonce be present and map to %{client: client, responses: []}
+    pending_puts: nil,
     # logical clock for versioning
     vector_clock: nil
   )
@@ -189,20 +208,29 @@ defmodule DynamoNode do
   the co-ordinator for the requested key.
 
   Steps:
+  -- These steps happen synchronously
   1. Request all versions of data from the top `n` nodes in
        the preference list for key (regardless of whether
        we believe them to be healthy or not).
+
+  -- These steps happen asynchronously, i.e. outside this function
   2. Wait for r responses.
   3. Return all latest concurrent versions of the key's values
        received.
   """
-  def get_as_coordinator(state, client, msg) do
-    # This function should return immediately, and not keep the
-    # receive loop waiting while we get all `r` responses.
-    # Thus we probably need to spawn another process.
-    # Such a process would not need to share any state with this one,
-    # aside from the ring.
-    raise "TODO get"
+  def get_as_coordinator(state, client, %ClientRequest.Get{
+        nonce: nonce,
+        key: key
+      }) do
+    Enum.each(get_preference_list(state, key), fn node ->
+      send(node, %CoordinatorRequest.Get{nonce: nonce, key: key})
+    end)
+
+    %{
+      state
+      | pending_gets:
+          Map.put(state.pending_gets, nonce, %{client: client, responses: %{}})
+    }
   end
 
   @doc """
@@ -210,16 +238,43 @@ defmodule DynamoNode do
   the co-ordinator for the requested key.
 
   Steps:
+  -- These steps happen synchronously
   1. Increment vector_clock
   2. Write to own store
   3. Send {key,value,vector_clock} to top `n` nodes in
        the preference list for key
+
+  -- These steps happen asynchronously, i.e. outside this function
   4. Wait for responses.
   5. If (w - 1) responses received, return success,
        otherwise failure.
   """
-  def put_as_coordinator(state, client, msg) do
-    raise "TODO put"
+  def put_as_coordinator(state, client, %ClientRequest.Put{
+        nonce: nonce,
+        key: key,
+        value: value
+      }) do
+    state = %{
+      state
+      | vector_clock: VectorClock.tick(state.vector_clock, state.id)
+    }
+
+    state = put(state, key, value, state.vector_clock)
+
+    Enum.each(get_preference_list(state, key), fn node ->
+      send(node, %CoordinatorRequest.Put{
+        nonce: nonce,
+        key: key,
+        value: value,
+        clock: state.vector_clock
+      })
+    end)
+
+    %{
+      state
+      | pending_puts:
+          Map.put(state.pending_puts, nonce, %{client: client, responses: []})
+    }
   end
 
   @doc """
