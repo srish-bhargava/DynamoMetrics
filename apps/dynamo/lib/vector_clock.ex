@@ -90,4 +90,58 @@ defmodule VectorClock do
       true -> :after
     end
   end
+
+  @doc """
+  Check if clock_1 is before clock_2.
+
+      iex> VectorClock.before?(%{a: 4, b: 2}, %{a: 5, b: 7})
+      true
+
+      iex> VectorClock.before?(%{a: 4, b: 7}, %{a: 5, b: 7})
+      true
+
+      iex> VectorClock.before?(%{a: 4, b: 8}, %{a: 5, b: 7})
+      false
+
+      iex> VectorClock.before?(%{a: 4, b: 2, c: 2}, %{a: 5, b: 7})
+      false
+  """
+  def before?(clock_1, clock_2) do
+    compare(clock_1, clock_2) == :before
+  end
+
+  @doc """
+  Check if clock_1 is after clock_2.
+
+      iex> VectorClock.after?(%{a: 5, b: 7}, %{a: 4, b: 2})
+      true
+
+      iex> VectorClock.after?(%{a: 5, b: 7}, %{a: 4, b: 7})
+      true
+
+      iex> VectorClock.after?(%{a: 5, b: 7}, %{a: 4, b: 8})
+      false
+
+      iex> VectorClock.after?(%{a: 5, b: 7}, %{a: 4, b: 2, c: 2})
+      false
+  """
+  def after?(clock_1, clock_2) do
+    compare(clock_1, clock_2) == :after
+  end
+
+  @doc """
+  Check if clock_1 is concurrent with clock_2.
+
+      iex> VectorClock.concurrent?(%{a: 5, b: 7}, %{a: 4, b: 2})
+      false
+
+      iex> VectorClock.concurrent?(%{a: 5, b: 7}, %{a: 4, b: 8})
+      true
+
+      iex> VectorClock.concurrent?(%{a: 5, b: 7}, %{a: 4, b: 2, c: 2})
+      true
+  """
+  def concurrent?(clock_1, clock_2) do
+    compare(clock_1, clock_2) == :concurrent
+  end
 end
