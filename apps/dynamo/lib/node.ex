@@ -19,6 +19,7 @@ defmodule DynamoNode do
     # node id
     id: nil,
     # local storage of key-(value, clock) pairs
+    # only stores concurrent versions
     store: nil,
     # all nodes in the cluster
     nodes: nil,
@@ -156,7 +157,9 @@ defmodule DynamoNode do
        } = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(coordinator)}")
 
-        raise "TODO"
+        state = put(state, key, value, clock)
+        send(coordinator, %CoordinatorResponse.Put{key: key})
+        listener(state)
 
       # node responses to coordinator requests
       {node,
@@ -215,6 +218,24 @@ defmodule DynamoNode do
   def put_as_coordinator(state, key, value) do
     raise "TODO put"
   end
+
+  @doc """
+  Add `key`-`value` association to local storage,
+  squashing any outdated versions.
+  """
+  def put(state, key, value, clock) do
+    Logger.debug("Writing #{inspect(value)} to key #{inspect(key)}")
+
+    new_value = {value, clock}
+
+    new_store =
+      Map.update(state.store, key, [new_value], fn orig_values ->
+        remove_outdated([new_value | orig_values])
+      end)
+
+    %{state | store: new_store}
+  end
+
   @doc """
   Remove outdated values from a list of {value, clock} pairs.
 
