@@ -80,7 +80,7 @@ defmodule DynamoNode do
     # TODO figure out when we should update vector_clock
     receive do
       # client requests
-      {client, %ClientRequest.Get{key: key} = msg} ->
+      {client, %ClientRequest.Get{nonce: nonce, key: key} = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(client)}")
 
         coordinator = get_coordinator(state, key)
@@ -99,7 +99,7 @@ defmodule DynamoNode do
           listener(state)
         end
 
-      {client, %ClientRequest.Put{key: key, value: value} = msg} ->
+      {client, %ClientRequest.Put{nonce: nonce, key: key, value: value} = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(client)}")
 
         coordinator = get_coordinator(state, key)
@@ -133,7 +133,7 @@ defmodule DynamoNode do
       {node,
        %RedirectedClientRequest{
          client: client,
-         request: %ClientRequest.Put{key: key, value: value}
+         request: %ClientRequest.Put{nonce: nonce, key: key, value: value}
        } = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
 
@@ -142,15 +142,18 @@ defmodule DynamoNode do
         listener(state)
 
       # coordinator requests
-      {coordinator, %CoordinatorRequest.Get{key: key} = msg} ->
+      {coordinator, %CoordinatorRequest.Get{nonce: nonce, key: key} = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(coordinator)}")
 
         values = Map.get(state.store, key)
-        send(coordinator, %CoordinatorResponse.Get{key: key, values: values})
+
+        send(coordinator, %CoordinatorResponse.Get{nonce: nonce, values: values})
+
         listener(state)
 
       {coordinator,
        %CoordinatorRequest.Put{
+         nonce: nonce,
          key: key,
          value: value,
          clock: clock
@@ -158,13 +161,13 @@ defmodule DynamoNode do
         Logger.info("Received #{inspect(msg)} from #{inspect(coordinator)}")
 
         state = put(state, key, value, clock)
-        send(coordinator, %CoordinatorResponse.Put{key: key})
+        send(coordinator, %CoordinatorResponse.Put{nonce: nonce})
         listener(state)
 
       # node responses to coordinator requests
       {node,
        %CoordinatorResponse.Get{
-         key: key,
+         nonce: nonce,
          values: values
        } = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
@@ -173,7 +176,7 @@ defmodule DynamoNode do
 
       {node,
        %CoordinatorResponse.Put{
-         key: key
+         nonce: nonce
        } = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
 

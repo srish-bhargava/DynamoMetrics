@@ -2,7 +2,7 @@ defmodule ClientRequest.Get do
   @moduledoc """
   Message from a client for a `get` request.
   """
-  defstruct(key: nil)
+  defstruct(nonce: nil, key: nil)
 end
 
 defmodule ClientResponse.Get do
@@ -11,8 +11,8 @@ defmodule ClientResponse.Get do
   to a `get` request.
   """
   defstruct(
+    nonce: nil,
     success: nil,
-    key: nil,
     # collection of values and versions
     values: nil
   )
@@ -23,6 +23,7 @@ defmodule ClientRequest.Put do
   Message from a client for a `put` request.
   """
   defstruct(
+    nonce: nil,
     key: nil,
     value: nil
   )
@@ -34,8 +35,8 @@ defmodule ClientResponse.Put do
   to a `put` request.
   """
   defstruct(
-    success: nil,
-    key: nil
+    nonce: nil,
+    success: nil
   )
 end
 
@@ -43,7 +44,7 @@ defmodule CoordinatorRequest.Get do
   @moduledoc """
   Message from a coordinator to a dynamo node to `get` a key.
   """
-  defstruct(key: nil)
+  defstruct(nonce: nil, key: nil)
 end
 
 defmodule CoordinatorResponse.Get do
@@ -51,7 +52,7 @@ defmodule CoordinatorResponse.Get do
   Message from a dynamo node to a coordinator in response to a `get`.
   """
   defstruct(
-    key: nil,
+    nonce: nil,
     values: nil
   )
 end
@@ -61,6 +62,7 @@ defmodule CoordinatorRequest.Put do
   Message from a coordinator to a dynamo node to `put` a key=value.
   """
   defstruct(
+    nonce: nil,
     key: nil,
     value: nil,
     clock: nil
@@ -71,7 +73,7 @@ defmodule CoordinatorResponse.Put do
   @moduledoc """
   Message from a dynamo node to a coordinator in response to a `put`.
   """
-  defstruct(key: nil)
+  defstruct(nonce: nil)
 end
 
 defmodule RedirectedClientRequest do

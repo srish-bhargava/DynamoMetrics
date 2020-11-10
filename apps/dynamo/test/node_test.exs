@@ -70,7 +70,7 @@ defmodule DynamoNodeTest do
         )
       end
 
-      send(:a, %ClientRequest.Get{key: :foo})
+      send(:a, %ClientRequest.Get{nonce: Nonce.new(), key: :foo})
 
       receive do
         {:DOWN, _handle, _, proc, reason} ->
@@ -92,7 +92,7 @@ defmodule DynamoNodeTest do
         )
       end
 
-      send(:a, %ClientRequest.Put{key: :foo, value: 49})
+      send(:a, %ClientRequest.Put{nonce: Nonce.new(), key: :foo, value: 49})
 
       receive do
         {:DOWN, _handle, _, proc, reason} ->
@@ -105,55 +105,73 @@ defmodule DynamoNodeTest do
   end
 
   test "First get request returns the initial value" do
+    nonce = Nonce.new()
+
     spawn(:node, fn ->
       DynamoNode.start(:node, %{foo: 42}, [:node], 1, 1, 1)
     end)
 
-    send(:node, %ClientRequest.Get{key: :foo})
+    send(:node, %ClientRequest.Get{nonce: nonce, key: :foo})
 
     assert_receive {_node,
                     %ClientResponse.Get{
+                      nonce: ^nonce,
                       success: true,
-                      key: :foo,
                       values: [{42, _clock}]
                     }},
                    5_000
   end
 
   test "Simple put request is successful" do
+    nonce = Nonce.new()
+
     spawn(:node, fn ->
       DynamoNode.start(:node, %{}, [:node], 1, 1, 1)
     end)
 
-    send(:node, %ClientRequest.Put{key: :foo, value: 42})
+    send(:node, %ClientRequest.Put{nonce: nonce, key: :foo, value: 42})
 
-    assert_receive {_node, %ClientResponse.Put{success: true, key: :foo}},
+    assert_receive {_node, %ClientResponse.Put{nonce: ^nonce, success: true}},
                    5_000
   end
 
   test "get after a put returns the put value with empty initial data" do
+    nonce_put = Nonce.new()
+    nonce_get = Nonce.new()
+
     spawn(:node, fn ->
       DynamoNode.start(:node, %{}, [:node], 1, 1, 1)
     end)
 
-    send(:node, %ClientRequest.Put{key: :foo, value: 42})
-    send(:node, %ClientRequest.Get{key: :foo})
+    send(:node, %ClientRequest.Put{nonce: nonce_put, key: :foo, value: 42})
+    send(:node, %ClientRequest.Get{nonce: nonce_get, key: :foo})
 
     assert_receive {_node,
-                    %ClientResponse.Get{success: true, values: [{42, _clock}]}},
+                    %ClientResponse.Get{
+                      nonce: ^nonce_get,
+                      success: true,
+                      values: [{42, _clock}]
+                    }},
                    5_000
   end
 
   test "put request overwrites key in initial data" do
+    nonce_put = Nonce.new()
+    nonce_get = Nonce.new()
+
     spawn(:node, fn ->
       DynamoNode.start(:node, %{foo: 37}, [:node], 1, 1, 1)
     end)
 
-    send(:node, %ClientRequest.Put{key: :foo, value: 42})
-    send(:node, %ClientRequest.Get{key: :foo})
+    send(:node, %ClientRequest.Put{nonce: nonce_put, key: :foo, value: 42})
+    send(:node, %ClientRequest.Get{nonce: nonce_get, key: :foo})
 
     assert_receive {_node,
-                    %ClientResponse.Get{success: true, values: [{42, _clock}]}},
+                    %ClientResponse.Get{
+                      nonce: ^nonce_get,
+                      success: true,
+                      values: [{42, _clock}]
+                    }},
                    5_000
   end
 end

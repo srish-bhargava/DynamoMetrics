@@ -11,14 +11,17 @@ defmodule Client do
   Contact a node to get the value of a key.
   """
   def get(node, key) do
+    nonce = Nonce.new()
+
     send(node, %ClientRequest.Get{
+      nonce: nonce,
       key: key
     })
 
     receive do
       {_node,
        %ClientResponse.Get{
-         key: ^key
+         nonce: ^nonce
        } = msg} ->
         msg
     end
@@ -28,7 +31,10 @@ defmodule Client do
   Contact a node to insert/replace the value of a key.
   """
   def put(node, key, value) do
+    nonce = Nonce.new()
+
     send(node, %ClientRequest.Put{
+      nonce: nonce,
       key: key,
       value: value
     })
@@ -36,7 +42,7 @@ defmodule Client do
     receive do
       {_node,
        %ClientResponse.Put{
-         key: ^key
+         nonce: ^nonce
        } = msg} ->
         msg
     end
