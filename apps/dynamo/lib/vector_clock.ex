@@ -59,27 +59,35 @@ defmodule VectorClock do
 
       iex> VectorClock.compare(%{a: 5, b: 2, c: 6, d: 9}, %{a: 1, b: 0, c: 3})
       :after
+
+      iex> VectorClock.compare(%{a: 4, b: 7}, %{a: 5, b: 7})
+      :before
   """
   def compare(clock_1, clock_2) do
     keys =
       MapSet.union(MapSet.new(Map.keys(clock_1)), MapSet.new(Map.keys(clock_2)))
 
-    pointwise_comparisons =
-      for key <- keys do
+    comparisons =
+      for key <- keys, into: MapSet.new() do
         val_1 = Map.get(clock_1, key, 0)
         val_2 = Map.get(clock_2, key, 0)
 
         cond do
           val_1 < val_2 -> :before
           val_1 > val_2 -> :after
-          val_1 == val_2 -> :concurrent
+          val_1 == val_2 -> :equal
         end
       end
 
     cond do
-      Enum.all?(pointwise_comparisons, fn x -> x == :before end) -> :before
-      Enum.all?(pointwise_comparisons, fn x -> x == :after end) -> :after
-      true -> :concurrent
+      # before at some points and after at others => no order
+      :before in comparisons and :after in comparisons -> :concurrent
+      # completely equal
+      :equal in comparisons and MapSet.size(comparisons) == 1 -> :concurrent
+      # before at some points and equal at others
+      :before in comparisons -> :before
+      # after at some points and equal at others
+      true -> :after
     end
   end
 end
