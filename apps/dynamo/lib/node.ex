@@ -86,7 +86,10 @@ defmodule DynamoNode do
 
         if coordinator != state.id do
           # we are not the coordinator, so redirect to them
-          send(coordinator, %RedirectedClientRequest{client: client, request: msg})
+          send(coordinator, %RedirectedClientRequest{
+            client: client,
+            request: msg
+          })
         else
           # we are the coordinator, so process the request
           get_as_coordinator(state, key)
@@ -99,7 +102,10 @@ defmodule DynamoNode do
 
         if coordinator != state.id do
           # we are not the coordinator, so redirect to them
-          send(coordinator, %RedirectedClientRequest{client: client, request: msg})
+          send(coordinator, %RedirectedClientRequest{
+            client: client,
+            request: msg
+          })
         else
           # we are the coordinator, so process the request
           put_as_coordinator(state, key, value)

@@ -61,7 +61,8 @@ defmodule VectorClock do
       :after
   """
   def compare(clock_1, clock_2) do
-    keys = MapSet.union(MapSet.new(Map.keys(clock_1)), MapSet.new(Map.keys(clock_2)))
+    keys =
+      MapSet.union(MapSet.new(Map.keys(clock_1)), MapSet.new(Map.keys(clock_2)))
 
     pointwise_comparisons =
       for key <- keys do
