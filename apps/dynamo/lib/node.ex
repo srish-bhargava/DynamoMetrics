@@ -56,9 +56,14 @@ defmodule DynamoNode do
   @doc """
   Set up node and start serving requests.
   """
-  def start(id, store, nodes, n, r, w) do
+  def start(id, data, nodes, n, r, w) do
     Logger.info("Starting node #{inspect(id)}")
     Logger.metadata(id: id)
+
+    vector_clock = VectorClock.new(nodes)
+
+    # convert data from a key-value map to a versioned store
+    store = Map.new(data, fn {k, v} -> {k, [{v, vector_clock}]} end)
 
     state = %DynamoNode{
       id: id,
@@ -68,7 +73,9 @@ defmodule DynamoNode do
       n: n,
       r: r,
       w: w,
-      vector_clock: VectorClock.new(nodes)
+      pending_gets: %{},
+      pending_puts: %{},
+      vector_clock: vector_clock
     }
 
     # TODO start anti-entropy in a background process
@@ -184,14 +191,10 @@ defmodule DynamoNode do
         listener(state)
 
       # node responses to coordinator requests
-      {node,
-       %CoordinatorResponse.Get{
-         nonce: nonce,
-         values: values
-       } = msg} ->
+      {node, %CoordinatorResponse.Get{} = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
-
-        raise "TODO"
+        state = get_resp_as_coordinator(state, node, msg)
+        listener(state)
 
       {node,
        %CoordinatorResponse.Put{
@@ -213,16 +216,20 @@ defmodule DynamoNode do
        the preference list for key (regardless of whether
        we believe them to be healthy or not).
 
-  -- These steps happen asynchronously, i.e. outside this function
+  -- These steps happen asynchronously in `get_resp_as_coordinator`
+     whenever we receive a CoordinatorResponse.Get msg
   2. Wait for r responses.
   3. Return all latest concurrent versions of the key's values
        received.
+
+  TODO Return failure to client on a timeout?
   """
   def get_as_coordinator(state, client, %ClientRequest.Get{
         nonce: nonce,
         key: key
       }) do
     Enum.each(get_preference_list(state, key), fn node ->
+      # DO send get request to self
       send(node, %CoordinatorRequest.Get{nonce: nonce, key: key})
     end)
 
@@ -231,6 +238,65 @@ defmodule DynamoNode do
       | pending_gets:
           Map.put(state.pending_gets, nonce, %{client: client, responses: %{}})
     }
+  end
+
+  @doc """
+  Process a CoordinatorResponse.Get msg
+
+  Add it to the list of responses in `pending_gets`.
+  If we have `r` or more responses for the corresponding client request,
+  remove this request from `pending_gets` and return all latest values to
+  the client.
+  """
+  def get_resp_as_coordinator(state, node, %CoordinatorResponse.Get{
+        nonce: nonce,
+        values: values
+      }) do
+    if not Map.has_key?(state.pending_gets, nonce) do
+      # ignore this response
+      # the request has been dealt with already
+      state
+    else
+      %{client: client, responses: responses} = state.pending_gets[nonce]
+      new_responses = Map.put(responses, node, values)
+
+      if Map.size(new_responses) >= state.r do
+        Logger.info(
+          "Got r or more responses for #{inspect(client)}'s get " <>
+            "request [nonce=#{inspect(nonce)}]"
+        )
+
+        # enough responses, respond to client
+        latest_values =
+          new_responses
+          |> Map.values()
+          |> List.flatten()
+          |> Enum.sort()
+          |> Enum.dedup()
+          |> remove_outdated
+
+        send(client, %ClientResponse.Get{
+          nonce: nonce,
+          success: true,
+          values: latest_values
+        })
+
+        # request not pending anymore, so get rid of the entry
+        %{
+          state
+          | pending_gets: Map.delete(state.pending_gets, nonce)
+        }
+      else
+        # not enough responses yet
+        new_pending_gets =
+          Map.put(state.pending_gets, nonce, %{
+            client: client,
+            responses: new_responses
+          })
+
+        %{state | pending_gets: new_pending_gets}
+      end
+    end
   end
 
   @doc """
