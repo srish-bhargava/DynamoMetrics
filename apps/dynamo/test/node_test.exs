@@ -1,16 +1,28 @@
 defmodule DynamoNodeTest do
   use ExUnit.Case
-  doctest Node
+  doctest DynamoNode
 
   import Emulation, only: [spawn: 2, send: 2]
 
   import Kernel,
     except: [spawn: 3, spawn: 1, spawn_link: 1, spawn_link: 3, send: 2]
 
+  setup do
+    Emulation.init()
+    # NOTE Ideally, we'd run `Emulation.terminate()` after the test has ended
+    # However, the way `ExUnit` is set up does not allow this without repeating
+    # `Emulation.terminate()` in each test, since on_exit callbacks are run
+    # in a *separate* process after the test process ends.
+    # The fact that these test processes end quickly gives me hope that the
+    # relevant teardown is unnecesary, but I might be very mistaken.
+    #
+    # TLDR: not calling Emulation.terminate() makes me uneasy, but not enough
+    #       to do it in every test.
+    :ok
+  end
+
   describe "No crashes" do
     test "during startup of a single node" do
-      Emulation.init()
-
       handle =
         Process.monitor(
           spawn(:node, fn ->
@@ -25,12 +37,9 @@ defmodule DynamoNodeTest do
         5_000 ->
           true
       end
-    after
-      Emulation.terminate()
     end
 
     test "during startup of multiple nodes" do
-      Emulation.init()
       nodes = [:a, :b, :c]
 
       for node <- nodes do
@@ -48,12 +57,9 @@ defmodule DynamoNodeTest do
         5_000 ->
           true
       end
-    after
-      Emulation.terminate()
     end
 
     test "on a get request" do
-      Emulation.init()
       nodes = [:a, :b, :c]
 
       for node <- nodes do
@@ -73,12 +79,9 @@ defmodule DynamoNodeTest do
         5_000 ->
           true
       end
-    after
-      Emulation.terminate()
     end
 
     test "on a put request" do
-      Emulation.init()
       nodes = [:a, :b, :c]
 
       for node <- nodes do
@@ -98,127 +101,59 @@ defmodule DynamoNodeTest do
         5_000 ->
           true
       end
-    after
-      Emulation.terminate()
     end
   end
 
   test "First get request returns the initial value" do
-    Emulation.init()
-
-    node =
-      spawn(:node, fn ->
-        DynamoNode.start(:node, %{foo: 42}, [:node], 1, 1, 1)
-      end)
+    spawn(:node, fn ->
+      DynamoNode.start(:node, %{foo: 42}, [:node], 1, 1, 1)
+    end)
 
     send(:node, %ClientRequest.Get{key: :foo})
 
-    node_handle = Process.monitor(node)
-
-    receive do
-      {_node, %ClientResponse.Get{success: success, key: :foo, values: values}} ->
-        assert success == true, "get request unsuccessful even with perfect conditions"
-        assert [{42, _clock}] = values, "wrong or multiple values received for key"
-
-      {:DOWN, ^node_handle, _, proc, reason} ->
-        assert false, "node #{inspect(proc)} crashed (reason: #{reason})"
-
-      msg ->
-        assert false, "unexpected msg received: #{inspect(msg)}"
-    after
-      5_000 ->
-        assert false, "no message received"
-    end
-  after
-    Emulation.terminate()
+    assert_receive {_node,
+                    %ClientResponse.Get{
+                      success: true,
+                      key: :foo,
+                      values: [{42, _clock}]
+                    }},
+                   5_000
   end
 
   test "Simple put request is successful" do
-    Emulation.init()
-
-    node =
-      spawn(:node, fn ->
-        DynamoNode.start(:node, %{}, [:node], 1, 1, 1)
-      end)
-
-    node_handle = Process.monitor(node)
+    spawn(:node, fn ->
+      DynamoNode.start(:node, %{}, [:node], 1, 1, 1)
+    end)
 
     send(:node, %ClientRequest.Put{key: :foo, value: 42})
 
-    receive do
-      {_node, %ClientResponse.Put{success: success, key: :foo}} ->
-        assert success == true, "put request unsuccessful even with perfect conditions"
-
-      {:DOWN, ^node_handle, _, proc, reason} ->
-        assert false, "node #{inspect(proc)} crashed (reason: #{reason})"
-
-      msg ->
-        assert false, "unexpected msg received: #{inspect(msg)}"
-    after
-      5_000 ->
-        assert false, "no message received"
-    end
-  after
-    Emulation.terminate()
+    assert_receive {_node, %ClientResponse.Put{success: true, key: :foo}},
+                   5_000
   end
 
   test "get after a put returns the put value with empty initial data" do
-    Emulation.init()
-
-    node =
-      spawn(:node, fn ->
-        DynamoNode.start(:node, %{}, [:node], 1, 1, 1)
-      end)
-
-    node_handle = Process.monitor(node)
+    spawn(:node, fn ->
+      DynamoNode.start(:node, %{}, [:node], 1, 1, 1)
+    end)
 
     send(:node, %ClientRequest.Put{key: :foo, value: 42})
-
-    receive do
-      _ -> true
-    end
-
     send(:node, %ClientRequest.Get{key: :foo})
 
-    receive do
-      {_node, %ClientResponse.Get{success: success, key: :foo, values: values}} ->
-        assert success == true
-        assert [{42, _clock}] = values, "different value(s) returned from :get"
-    after
-      5_000 ->
-        assert false, "no message received"
-    end
-  after
-    Emulation.terminate()
+    assert_receive {_node,
+                    %ClientResponse.Get{success: true, values: [{42, _clock}]}},
+                   5_000
   end
 
   test "put request overwrites key in initial data" do
-    Emulation.init()
-
-    node =
-      spawn(:node, fn ->
-        DynamoNode.start(:node, %{foo: 37}, [:node], 1, 1, 1)
-      end)
-
-    node_handle = Process.monitor(node)
+    spawn(:node, fn ->
+      DynamoNode.start(:node, %{foo: 37}, [:node], 1, 1, 1)
+    end)
 
     send(:node, %ClientRequest.Put{key: :foo, value: 42})
-
-    receive do
-      _ -> true
-    end
-
     send(:node, %ClientRequest.Get{key: :foo})
 
-    receive do
-      {_node, %ClientResponse.Get{success: success, key: :foo, values: values}} ->
-        refute [{37, _clock}] = values, "put did not overwrite key's value"
-        assert [{42, _clock}] = values, "different value returned from :get"
-    after
-      5_000 ->
-        assert false, "no message received"
-    end
-  after
-    Emulation.terminate()
+    assert_receive {_node,
+                    %ClientResponse.Get{success: true, values: [{42, _clock}]}},
+                   5_000
   end
 end
