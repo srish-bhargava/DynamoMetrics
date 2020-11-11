@@ -381,22 +381,33 @@ defmodule DynamoNode do
   def coord_handle_put_resp(state, node, %CoordinatorResponse.Put{
         nonce: nonce
       }) do
-    if not Map.has_key?(state.pending_puts, nonce) do
-      # ignore this response
-      # the request has been dealt with already
-      state
-    else
-      %{client: client, responses: responses} = state.pending_puts[nonce]
-      new_responses = MapSet.put(responses, node)
+    old_req_state = Map.get(state.pending_gets, nonce)
 
-      if MapSet.size(new_responses) >= state.w - 1 do
+    new_req_state =
+      if old_req_state == nil do
+        nil
+      else
+        %{
+          old_req_state
+          | responses: MapSet.put(old_req_state.responses, node)
+        }
+      end
+
+    cond do
+      new_req_state == nil ->
+        # ignore this response
+        # the request has been dealt with already
+        state
+
+      MapSet.size(new_req_state.responses) >= state.w - 1 ->
         Logger.info(
-          "Got w - 1 or more responses for #{inspect(client)}'s get " <>
+          "Got w - 1 or more responses for " <>
+            "#{inspect(new_req_state.client)}'s get " <>
             "request [nonce=#{inspect(nonce)}]"
         )
 
         # enough responses, respond to client
-        send(client, %ClientResponse.Put{
+        send(new_req_state.client, %ClientResponse.Put{
           nonce: nonce,
           success: true
         })
@@ -406,16 +417,13 @@ defmodule DynamoNode do
           state
           | pending_puts: Map.delete(state.pending_puts, nonce)
         }
-      else
-        # not enough responses yet
-        new_pending_puts =
-          Map.put(state.pending_puts, nonce, %{
-            client: client,
-            responses: new_responses
-          })
 
-        %{state | pending_puts: new_pending_puts}
-      end
+      true ->
+        # not enough responses yet
+        %{
+          state
+          | pending_puts: Map.put(state.pending_puts, nonce, new_req_state)
+        }
     end
   end
 
