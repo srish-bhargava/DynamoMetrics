@@ -113,12 +113,11 @@ defmodule DynamoNodeTest do
 
     send(:node, %ClientRequest.Get{nonce: nonce, key: :foo})
 
-    assert_receive {_node,
-                    %ClientResponse.Get{
-                      nonce: ^nonce,
-                      success: true,
-                      values: [{42, _clock}]
-                    }},
+    assert_receive %ClientResponse.Get{
+                     nonce: ^nonce,
+                     success: true,
+                     values: [{42, _clock}]
+                   },
                    5_000
   end
 
@@ -131,7 +130,7 @@ defmodule DynamoNodeTest do
 
     send(:node, %ClientRequest.Put{nonce: nonce, key: :foo, value: 42})
 
-    assert_receive {_node, %ClientResponse.Put{nonce: ^nonce, success: true}},
+    assert_receive %ClientResponse.Put{nonce: ^nonce, success: true},
                    5_000
   end
 
@@ -146,12 +145,11 @@ defmodule DynamoNodeTest do
     send(:node, %ClientRequest.Put{nonce: nonce_put, key: :foo, value: 42})
     send(:node, %ClientRequest.Get{nonce: nonce_get, key: :foo})
 
-    assert_receive {_node,
-                    %ClientResponse.Get{
-                      nonce: ^nonce_get,
-                      success: true,
-                      values: [{42, _clock}]
-                    }},
+    assert_receive %ClientResponse.Get{
+                     nonce: ^nonce_get,
+                     success: true,
+                     values: [{42, _clock}]
+                   },
                    5_000
   end
 
@@ -166,12 +164,11 @@ defmodule DynamoNodeTest do
     send(:node, %ClientRequest.Put{nonce: nonce_put, key: :foo, value: 42})
     send(:node, %ClientRequest.Get{nonce: nonce_get, key: :foo})
 
-    assert_receive {_node,
-                    %ClientResponse.Get{
-                      nonce: ^nonce_get,
-                      success: true,
-                      values: [{42, _clock}]
-                    }},
+    assert_receive %ClientResponse.Get{
+                     nonce: ^nonce_get,
+                     success: true,
+                     values: [{42, _clock}]
+                   },
                    5_000
   end
 end
