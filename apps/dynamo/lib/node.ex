@@ -121,7 +121,7 @@ defmodule DynamoNode do
           listener(state)
         else
           # we are the coordinator, so process the request
-          state = get_as_coordinator(state, client, msg)
+          state = coord_handle_get_req(state, client, msg)
           listener(state)
         end
 
@@ -140,7 +140,7 @@ defmodule DynamoNode do
           listener(state)
         else
           # we are the coordinator, so process the request
-          state = put_as_coordinator(state, client, msg)
+          state = coord_handle_put_req(state, client, msg)
           listener(state)
         end
 
@@ -153,7 +153,7 @@ defmodule DynamoNode do
         Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
 
         # we must be the coordinator for this key
-        state = get_as_coordinator(state, client, orig_msg)
+        state = coord_handle_get_req(state, client, orig_msg)
         listener(state)
 
       {node,
@@ -164,7 +164,7 @@ defmodule DynamoNode do
         Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
 
         # we must be the coordinator for this key
-        state = put_as_coordinator(state, client, orig_msg)
+        state = coord_handle_put_req(state, client, orig_msg)
         listener(state)
 
       # coordinator requests
@@ -193,13 +193,13 @@ defmodule DynamoNode do
       # node responses to coordinator requests
       {node, %CoordinatorResponse.Get{} = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
-        state = get_resp_as_coordinator(state, node, msg)
+        state = coord_handle_get_resp(state, node, msg)
         listener(state)
 
       {node, %CoordinatorResponse.Put{} = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
 
-        state = put_resp_as_coordinator(state, node, msg)
+        state = coord_handle_put_resp(state, node, msg)
         listener(state)
     end
   end
@@ -214,15 +214,18 @@ defmodule DynamoNode do
        the preference list for key (regardless of whether
        we believe them to be healthy or not).
 
-  -- These steps happen asynchronously in `get_resp_as_coordinator`
+  -- These steps happen asynchronously in `coord_handle_get_resp`
      whenever we receive a CoordinatorResponse.Get msg
   2. Wait for r responses.
   3. Return all latest concurrent versions of the key's values
        received.
 
+  TODO Why not handle this in the same way as put's -
+       i.e. read from own store and wait for `r - 1` responses
+
   TODO Return failure to client on a timeout?
   """
-  def get_as_coordinator(state, client, %ClientRequest.Get{
+  def coord_handle_get_req(state, client, %ClientRequest.Get{
         nonce: nonce,
         key: key
       }) do
@@ -246,34 +249,45 @@ defmodule DynamoNode do
   remove this request from `pending_gets` and return all latest values to
   the client.
   """
-  def get_resp_as_coordinator(state, node, %CoordinatorResponse.Get{
+  def coord_handle_get_resp(state, node, %CoordinatorResponse.Get{
         nonce: nonce,
         values: values
       }) do
-    if not Map.has_key?(state.pending_gets, nonce) do
-      # ignore this response
-      # the request has been dealt with already
-      state
-    else
-      %{client: client, responses: responses} = state.pending_gets[nonce]
-      new_responses = Map.put(responses, node, values)
+    old_req_state = Map.get(state.pending_gets, nonce)
 
-      if Map.size(new_responses) >= state.r do
+    new_req_state =
+      if old_req_state == nil do
+        nil
+      else
+        %{
+          old_req_state
+          | responses: Map.put(old_req_state.responses, node, values)
+        }
+      end
+
+    cond do
+      new_req_state == nil ->
+        # ignore this response
+        # the request has been dealt with already
+        state
+
+      map_size(new_req_state.responses) >= state.r ->
         Logger.info(
-          "Got r or more responses for #{inspect(client)}'s get " <>
+          "Got r or more responses for " <>
+            "#{inspect(new_req_state.client)}'s get " <>
             "request [nonce=#{inspect(nonce)}]"
         )
 
         # enough responses, respond to client
         latest_values =
-          new_responses
+          new_req_state.responses
           |> Map.values()
           |> List.flatten()
           |> Enum.sort()
           |> Enum.dedup()
-          |> remove_outdated
+          |> VectorClock.remove_outdated()
 
-        send(client, %ClientResponse.Get{
+        send(new_req_state.client, %ClientResponse.Get{
           nonce: nonce,
           success: true,
           values: latest_values
@@ -284,16 +298,13 @@ defmodule DynamoNode do
           state
           | pending_gets: Map.delete(state.pending_gets, nonce)
         }
-      else
-        # not enough responses yet
-        new_pending_gets =
-          Map.put(state.pending_gets, nonce, %{
-            client: client,
-            responses: new_responses
-          })
 
-        %{state | pending_gets: new_pending_gets}
-      end
+      true ->
+        # not enough responses yet
+        %{
+          state
+          | pending_gets: Map.put(state.pending_gets, nonce, new_req_state)
+        }
     end
   end
 
@@ -315,7 +326,7 @@ defmodule DynamoNode do
 
   TODO Return failure to client on a timeout?
   """
-  def put_as_coordinator(state, client, %ClientRequest.Put{
+  def coord_handle_put_req(state, client, %ClientRequest.Put{
         nonce: nonce,
         key: key,
         value: value
@@ -367,7 +378,7 @@ defmodule DynamoNode do
   remove this request from `pending_puts` and return all latest values to
   the client.
   """
-  def put_resp_as_coordinator(state, node, %CoordinatorResponse.Put{
+  def coord_handle_put_resp(state, node, %CoordinatorResponse.Put{
         nonce: nonce
       }) do
     if not Map.has_key?(state.pending_puts, nonce) do
@@ -419,56 +430,9 @@ defmodule DynamoNode do
 
     new_store =
       Map.update(state.store, key, [new_value], fn orig_values ->
-        remove_outdated([new_value | orig_values])
+        VectorClock.remove_outdated([new_value | orig_values])
       end)
 
     %{state | store: new_store}
-  end
-
-  @doc """
-  Remove outdated values from a list of {value, clock} pairs.
-
-      iex> DynamoNode.remove_outdated([])
-      []
-
-      iex> DynamoNode.remove_outdated([{:foo, %{a: 1}}, {:bar, %{a: 2}}])
-      [{:bar, %{a: 2}}]
-
-      iex> DynamoNode.remove_outdated([{:bar, %{a: 2}}, {:foo, %{a: 1}}])
-      [{:bar, %{a: 2}}]
-
-      iex> DynamoNode.remove_outdated([
-      ...>   {:foo, %{a: 1, b: 9}},
-      ...>   {:bar, %{a: 5, b: 1}},
-      ...> ])
-      [{:foo, %{a: 1, b: 9}}, {:bar, %{a: 5, b: 1}}]
-
-      iex> DynamoNode.remove_outdated([
-      ...>   {:foo, %{a: 1, b: 9}},
-      ...>   {:bar, %{a: 5, b: 1}},
-      ...>   {:baz, %{a: 6, b: 2}}
-      ...> ])
-
-      [{:foo, %{a: 1, b: 9}}, {:baz, %{a: 6, b: 2}}]
-  """
-  def remove_outdated(values) do
-    List.foldr(values, [], fn {_new_val, new_clock} = new_value,
-                              latest_values ->
-      actual_latest_values =
-        Enum.reject(latest_values, fn {_latest_val, latest_clock} ->
-          VectorClock.after?(new_clock, latest_clock)
-        end)
-
-      is_new_value_latest =
-        Enum.all?(actual_latest_values, fn {_latest_val, latest_clock} ->
-          not VectorClock.before?(new_clock, latest_clock)
-        end)
-
-      if is_new_value_latest do
-        [new_value | actual_latest_values]
-      else
-        actual_latest_values
-      end
-    end)
   end
 end
