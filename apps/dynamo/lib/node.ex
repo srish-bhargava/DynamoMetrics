@@ -351,7 +351,7 @@ defmodule DynamoNode do
       end
     end)
 
-    if state.w == 1 do
+    if state.w <= 1 do
       # we've already written once, so this is enough
       # respond to client, and don't mark this request as pending
       send(client, %ClientResponse.Put{
