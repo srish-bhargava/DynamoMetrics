@@ -9,10 +9,13 @@
 # move said applications out of the umbrella.
 import Config
 
-config :logger, :console,
-  metadata: [:id],
-  level: :info,
-  format: "$time: $metadata-> $message\n",
+config :logger,
+  backends: [:console],
+  level: :debug,
   compile_time_purge_matching: [
     [application: :emulation]
   ]
+
+config :logger, :console,
+  metadata: [:id],
+  format: "\n$time: $metadata-> $message"
