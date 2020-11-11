@@ -44,7 +44,7 @@ defmodule DynamoNode do
     # pending client put requests being handled
     # by this node as coordinator.
     # `pending_puts` is of the form:
-    # %{client_nonce => %{client: client, responses: [node]}}
+    # %{client_nonce => %{client: client, responses: MapSet(node)}}
     # Similar to `pending_gets`, a request that's pending but for which
     # no coordinator responses have been received yet WILL have its
     # client_nonce be present and map to %{client: client, responses: []}
@@ -196,13 +196,11 @@ defmodule DynamoNode do
         state = get_resp_as_coordinator(state, node, msg)
         listener(state)
 
-      {node,
-       %CoordinatorResponse.Put{
-         nonce: nonce
-       } = msg} ->
+      {node, %CoordinatorResponse.Put{} = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
 
-        raise "TODO"
+        state = put_resp_as_coordinator(state, node, msg)
+        listener(state)
     end
   end
 
@@ -314,6 +312,8 @@ defmodule DynamoNode do
   4. Wait for responses.
   5. If (w - 1) responses received, return success,
        otherwise failure.
+
+  TODO Return failure to client on a timeout?
   """
   def put_as_coordinator(state, client, %ClientRequest.Put{
         nonce: nonce,
@@ -325,22 +325,87 @@ defmodule DynamoNode do
       | vector_clock: VectorClock.tick(state.vector_clock, state.id)
     }
 
+    # write to own store
     state = put(state, key, value, state.vector_clock)
 
     Enum.each(get_preference_list(state, key), fn node ->
-      send(node, %CoordinatorRequest.Put{
-        nonce: nonce,
-        key: key,
-        value: value,
-        clock: state.vector_clock
-      })
+      # don't send put request to self
+      if node != state.id do
+        send(node, %CoordinatorRequest.Put{
+          nonce: nonce,
+          key: key,
+          value: value,
+          clock: state.vector_clock
+        })
+      end
     end)
 
-    %{
+    if state.w == 1 do
+      # we've already written once, so this is enough
+      # respond to client, and don't mark this request as pending
+      send(client, %ClientResponse.Put{
+        nonce: nonce,
+        success: true
+      })
+
       state
-      | pending_puts:
-          Map.put(state.pending_puts, nonce, %{client: client, responses: []})
-    }
+    else
+      # otherwise, mark pending
+      %{
+        state
+        | pending_puts:
+            Map.put(state.pending_puts, nonce, %{client: client, responses: []})
+      }
+    end
+  end
+
+  @doc """
+  Process a CoordinatorResponse.Put msg
+
+  Add it to the list of responses in `pending_puts`.
+  If we have `w - 1` or more responses for the corresponding client request,
+  remove this request from `pending_puts` and return all latest values to
+  the client.
+  """
+  def put_resp_as_coordinator(state, node, %CoordinatorResponse.Put{
+        nonce: nonce
+      }) do
+    if not Map.has_key?(state.pending_puts, nonce) do
+      # ignore this response
+      # the request has been dealt with already
+      state
+    else
+      %{client: client, responses: responses} = state.pending_puts[nonce]
+      new_responses = MapSet.put(responses, node)
+
+      if MapSet.size(new_responses) >= state.w - 1 do
+        Logger.info(
+          "Got w - 1 or more responses for #{inspect(client)}'s get " <>
+            "request [nonce=#{inspect(nonce)}]"
+        )
+
+        # enough responses, respond to client
+        send(client, %ClientResponse.Put{
+          nonce: nonce,
+          success: true
+        })
+
+        # request not pending anymore, so get rid of the entry
+        %{
+          state
+          | pending_puts: Map.delete(state.pending_puts, nonce)
+        }
+      else
+        # not enough responses yet
+        new_pending_puts =
+          Map.put(state.pending_puts, nonce, %{
+            client: client,
+            responses: new_responses
+          })
+
+        %{state | pending_puts: new_pending_puts}
+      end
+    end
   end
 
   @doc """
