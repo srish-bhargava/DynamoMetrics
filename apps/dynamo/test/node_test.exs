@@ -171,4 +171,66 @@ defmodule DynamoNodeTest do
                    },
                    5_000
   end
+
+  test "Simple get with multiple nodes" do
+    data = %{foo: 39, bar: 42, baz: 47}
+
+    nodes = [:a, :b, :c, :d, :e, :f]
+
+    Enum.each(nodes, fn node ->
+      spawn(node, fn ->
+        DynamoNode.start(node, data, nodes, 4, 3, 2)
+      end)
+    end)
+
+    for {key, value} <- data do
+      nonce = Nonce.new()
+
+      send(:c, %ClientRequest.Get{nonce: nonce, key: key})
+
+      assert_receive %ClientResponse.Get{
+                       nonce: ^nonce,
+                       success: true,
+                       values: [{^value, _clock}]
+                     },
+                     5_000
+    end
+  end
+
+  test "Simple put and get with multiple nodes" do
+    data = %{foo: 39, bar: 42, baz: 47}
+
+    nodes = [:a, :b, :c, :d, :e, :f]
+
+    Enum.each(nodes, fn node ->
+      spawn(node, fn ->
+        DynamoNode.start(node, data, nodes, 4, 3, 2)
+      end)
+    end)
+
+    for {key, value} <- data do
+      nonce = Nonce.new()
+
+      send(:c, %ClientRequest.Put{nonce: nonce, key: key, value: 100})
+    end
+
+    # wait a bit for the system to settle
+    receive do
+    after
+      1_000 -> true
+    end
+
+    for key <- Map.keys(data) do
+      nonce = Nonce.new()
+
+      send(:e, %ClientRequest.Get{nonce: nonce, key: key})
+
+      assert_receive %ClientResponse.Get{
+                       nonce: ^nonce,
+                       success: true,
+                       values: [{100, _clock}]
+                     },
+                     5_000
+    end
+  end
 end
