@@ -365,7 +365,10 @@ defmodule DynamoNode do
       %{
         state
         | pending_puts:
-            Map.put(state.pending_puts, nonce, %{client: client, responses: []})
+            Map.put(state.pending_puts, nonce, %{
+              client: client,
+              responses: MapSet.new()
+            })
       }
     end
   end
