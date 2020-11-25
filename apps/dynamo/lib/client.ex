@@ -30,13 +30,14 @@ defmodule Client do
   @doc """
   Contact a node to insert/replace the value of a key.
   """
-  def put(node, key, value) do
+  def put(node, key, context, value) do
     nonce = Nonce.new()
 
     send(node, %ClientRequest.Put{
       nonce: nonce,
       key: key,
-      value: value
+      value: value,
+      context: context
     })
 
     receive do

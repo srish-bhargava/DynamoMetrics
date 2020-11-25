@@ -4,13 +4,13 @@ defmodule VectorClock do
   """
 
   @doc """
-  Return a new vector clock with time at all nodes initialized to 0.
+  Return a new, empty, vector clock.
 
-      iex> VectorClock.new([:a, :b, :c])
-      %{a: 0, b: 0, c: 0}
+      iex> VectorClock.new()
+      %{}
   """
-  def new(nodes) do
-    for node <- nodes, into: %{}, do: {node, 0}
+  def new() do
+    %{}
   end
 
   @doc """
@@ -38,7 +38,7 @@ defmodule VectorClock do
       %{a: 1, b: 1, c: 3}
   """
   def tick(clock, proc) do
-    Map.update!(clock, proc, &(&1 + 1))
+    Map.update(clock, proc, 1, &(&1 + 1))
   end
 
   @doc """
@@ -143,52 +143,5 @@ defmodule VectorClock do
   """
   def concurrent?(clock_1, clock_2) do
     compare(clock_1, clock_2) == :concurrent
-  end
-
-  @doc """
-  Remove outdated values from a list of {value, clock} pairs.
-
-      iex> VectorClock.remove_outdated([])
-      []
-
-      iex> VectorClock.remove_outdated([{:foo, %{a: 1}}, {:bar, %{a: 2}}])
-      [{:bar, %{a: 2}}]
-
-      iex> VectorClock.remove_outdated([{:bar, %{a: 2}}, {:foo, %{a: 1}}])
-      [{:bar, %{a: 2}}]
-
-      iex> VectorClock.remove_outdated([
-      ...>   {:foo, %{a: 1, b: 9}},
-      ...>   {:bar, %{a: 5, b: 1}},
-      ...> ])
-      [{:foo, %{a: 1, b: 9}}, {:bar, %{a: 5, b: 1}}]
-
-      iex> VectorClock.remove_outdated([
-      ...>   {:foo, %{a: 1, b: 9}},
-      ...>   {:bar, %{a: 5, b: 1}},
-      ...>   {:baz, %{a: 6, b: 2}}
-      ...> ])
-
-      [{:foo, %{a: 1, b: 9}}, {:baz, %{a: 6, b: 2}}]
-  """
-  def remove_outdated(values) do
-    List.foldr(values, [], fn {_new_val, new_clock} = new_value,
-                              latest_values ->
-      actual_latest_values =
-        Enum.reject(latest_values, fn {_latest_val, latest_clock} ->
-          after?(new_clock, latest_clock)
-        end)
-
-      is_new_value_latest =
-        Enum.all?(actual_latest_values, fn {_latest_val, latest_clock} ->
-          not before?(new_clock, latest_clock)
-        end)
-
-      if is_new_value_latest do
-        [new_value | actual_latest_values]
-      else
-        actual_latest_values
-      end
-    end)
   end
 end

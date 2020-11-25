@@ -1,3 +1,10 @@
+defmodule Context do
+  @moduledoc """
+  Context for values in a key-value store.
+  """
+  defstruct(version: nil)
+end
+
 defmodule DynamoNode do
   @moduledoc """
   A replica node in a DynamoDB cluster.
@@ -18,7 +25,7 @@ defmodule DynamoNode do
   defstruct(
     # node id
     id: nil,
-    # local storage of key-(value, clock) pairs
+    # local storage of key-([value], context) pairs
     # only stores concurrent versions
     store: nil,
     # all nodes in the cluster
@@ -33,7 +40,7 @@ defmodule DynamoNode do
     # pending client get requests being handled
     # by this node as coordinator.
     # `pending_gets` is of the form:
-    # %{client_nonce => %{client: client, responses: %{node => values}}}
+    # %{client_nonce => %{client: client, responses: %{node => ([value], %Context{})}}}
     # Importantly, if a request has been dispatched to other nodes
     # but no coordinator responses have been received yet, then the
     # appropriate client_nonce WILL BE PRESENT and will map to {client, %{}}.
@@ -44,13 +51,11 @@ defmodule DynamoNode do
     # pending client put requests being handled
     # by this node as coordinator.
     # `pending_puts` is of the form:
-    # %{client_nonce => %{client: client, responses: MapSet(node)}}
+    # %{client_nonce => %{client: client, context: %Context{}, responses: MapSet(node)}}
     # Similar to `pending_gets`, a request that's pending but for which
     # no coordinator responses have been received yet WILL have its
     # client_nonce be present and map to %{client: client, responses: []}
-    pending_puts: nil,
-    # logical clock for versioning
-    vector_clock: nil
+    pending_puts: nil
   )
 
   @doc """
@@ -60,10 +65,11 @@ defmodule DynamoNode do
     Logger.info("Starting node #{inspect(id)}")
     Logger.metadata(id: id)
 
-    vector_clock = VectorClock.new(nodes)
-
     # convert data from a key-value map to a versioned store
-    store = Map.new(data, fn {k, v} -> {k, [{v, vector_clock}]} end)
+    store =
+      Map.new(data, fn {k, v} ->
+        {k, {[v], %Context{version: VectorClock.new()}}}
+      end)
 
     state = %DynamoNode{
       id: id,
@@ -74,8 +80,7 @@ defmodule DynamoNode do
       r: r,
       w: w,
       pending_gets: %{},
-      pending_puts: %{},
-      vector_clock: vector_clock
+      pending_puts: %{}
     }
 
     # TODO start anti-entropy in a background process
@@ -103,7 +108,6 @@ defmodule DynamoNode do
   Listen and serve requests, forever.
   """
   def listener(state) do
-    # TODO figure out when we should update vector_clock
     receive do
       # client requests
       {client, %ClientRequest.Get{key: key} = msg} ->
@@ -171,9 +175,13 @@ defmodule DynamoNode do
       {coordinator, %CoordinatorRequest.Get{nonce: nonce, key: key} = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(coordinator)}")
 
-        values = Map.get(state.store, key)
+        {values, context} = Map.get(state.store, key)
 
-        send(coordinator, %CoordinatorResponse.Get{nonce: nonce, values: values})
+        send(coordinator, %CoordinatorResponse.Get{
+          nonce: nonce,
+          values: values,
+          context: context
+        })
 
         listener(state)
 
@@ -182,11 +190,11 @@ defmodule DynamoNode do
          nonce: nonce,
          key: key,
          value: value,
-         clock: clock
+         context: context
        } = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(coordinator)}")
 
-        state = put(state, key, value, clock)
+        state = put(state, key, value, context)
         send(coordinator, %CoordinatorResponse.Put{nonce: nonce})
         listener(state)
 
@@ -251,7 +259,8 @@ defmodule DynamoNode do
   """
   def coord_handle_get_resp(state, node, %CoordinatorResponse.Get{
         nonce: nonce,
-        values: values
+        values: values,
+        context: context
       }) do
     old_req_state = Map.get(state.pending_gets, nonce)
 
@@ -261,7 +270,7 @@ defmodule DynamoNode do
       else
         %{
           old_req_state
-          | responses: Map.put(old_req_state.responses, node, values)
+          | responses: Map.put(old_req_state.responses, node, {values, context})
         }
       end
 
@@ -279,18 +288,16 @@ defmodule DynamoNode do
         )
 
         # enough responses, respond to client
-        latest_values =
+        {latest_values, context} =
           new_req_state.responses
           |> Map.values()
-          |> List.flatten()
-          |> Enum.sort()
-          |> Enum.dedup()
-          |> VectorClock.remove_outdated()
+          |> Enum.reduce(&merge_values/2)
 
         send(new_req_state.client, %ClientResponse.Get{
           nonce: nonce,
           success: true,
-          values: latest_values
+          values: latest_values,
+          context: context
         })
 
         # request not pending anymore, so get rid of the entry
@@ -314,7 +321,7 @@ defmodule DynamoNode do
 
   Steps:
   -- These steps happen synchronously
-  1. Increment vector_clock
+  1. Increment vector_clock of request context for own id
   2. Write to own store
   3. Send {key,value,vector_clock} to top `n` nodes in
        the preference list for key
@@ -329,15 +336,13 @@ defmodule DynamoNode do
   def coord_handle_put_req(state, client, %ClientRequest.Put{
         nonce: nonce,
         key: key,
-        value: value
+        value: value,
+        context: context
       }) do
-    state = %{
-      state
-      | vector_clock: VectorClock.tick(state.vector_clock, state.id)
-    }
+    context = %{context | version: VectorClock.tick(context.version, state.id)}
 
     # write to own store
-    state = put(state, key, value, state.vector_clock)
+    state = put(state, key, value, context)
 
     Enum.each(get_preference_list(state, key), fn node ->
       # don't send put request to self
@@ -346,7 +351,7 @@ defmodule DynamoNode do
           nonce: nonce,
           key: key,
           value: value,
-          clock: state.vector_clock
+          context: context
         })
       end
     end)
@@ -356,7 +361,8 @@ defmodule DynamoNode do
       # respond to client, and don't mark this request as pending
       send(client, %ClientResponse.Put{
         nonce: nonce,
-        success: true
+        success: true,
+        context: context
       })
 
       state
@@ -367,6 +373,7 @@ defmodule DynamoNode do
         | pending_puts:
             Map.put(state.pending_puts, nonce, %{
               client: client,
+              context: context,
               responses: MapSet.new()
             })
       }
@@ -412,7 +419,8 @@ defmodule DynamoNode do
         # enough responses, respond to client
         send(new_req_state.client, %ClientResponse.Put{
           nonce: nonce,
-          success: true
+          success: true,
+          context: new_req_state.context
         })
 
         # request not pending anymore, so get rid of the entry
@@ -434,16 +442,40 @@ defmodule DynamoNode do
   Add `key`-`value` association to local storage,
   squashing any outdated versions.
   """
-  def put(state, key, value, clock) do
+  def put(state, key, value, context) do
     Logger.debug("Writing #{inspect(value)} to key #{inspect(key)}")
 
-    new_value = {value, clock}
+    new_value = {[value], context}
 
     new_store =
-      Map.update(state.store, key, [new_value], fn orig_values ->
-        VectorClock.remove_outdated([new_value | orig_values])
+      Map.update(state.store, key, new_value, fn orig_value ->
+        merge_values(new_value, orig_value)
       end)
 
     %{state | store: new_store}
+  end
+
+  @doc """
+  Utility function to remove outdated values from a list of {value, clock} pairs.
+  """
+  def merge_values({vals1, context1} = value1, {vals2, context2} = value2) do
+    case VectorClock.compare(context1.version, context2.version) do
+      :before ->
+        value2
+
+      :after ->
+        value1
+
+      :concurrent ->
+        all_vals =
+          (vals1 ++ vals2)
+          |> Enum.sort()
+          |> Enum.dedup()
+
+        {all_vals,
+         %Context{
+           version: VectorClock.combine(context1.version, context2.version)
+         }}
+    end
   end
 end

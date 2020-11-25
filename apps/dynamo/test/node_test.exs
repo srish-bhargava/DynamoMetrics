@@ -92,7 +92,12 @@ defmodule DynamoNodeTest do
         )
       end
 
-      send(:a, %ClientRequest.Put{nonce: Nonce.new(), key: :foo, value: 49})
+      send(:a, %ClientRequest.Put{
+        nonce: Nonce.new(),
+        key: :foo,
+        value: 49,
+        context: %Context{version: VectorClock.new()}
+      })
 
       receive do
         {:DOWN, _handle, _, proc, reason} ->
@@ -116,7 +121,8 @@ defmodule DynamoNodeTest do
     assert_receive %ClientResponse.Get{
                      nonce: ^nonce,
                      success: true,
-                     values: [{42, _clock}]
+                     values: [42],
+                     context: _context
                    },
                    5_000
   end
@@ -128,7 +134,12 @@ defmodule DynamoNodeTest do
       DynamoNode.start(:node, %{}, [:node], 1, 1, 1)
     end)
 
-    send(:node, %ClientRequest.Put{nonce: nonce, key: :foo, value: 42})
+    send(:node, %ClientRequest.Put{
+      nonce: nonce,
+      key: :foo,
+      value: 42,
+      context: %Context{version: VectorClock.new()}
+    })
 
     assert_receive %ClientResponse.Put{nonce: ^nonce, success: true},
                    5_000
@@ -142,13 +153,20 @@ defmodule DynamoNodeTest do
       DynamoNode.start(:node, %{}, [:node], 1, 1, 1)
     end)
 
-    send(:node, %ClientRequest.Put{nonce: nonce_put, key: :foo, value: 42})
+    send(:node, %ClientRequest.Put{
+      nonce: nonce_put,
+      key: :foo,
+      value: 42,
+      context: %Context{version: VectorClock.new()}
+    })
+
     send(:node, %ClientRequest.Get{nonce: nonce_get, key: :foo})
 
     assert_receive %ClientResponse.Get{
                      nonce: ^nonce_get,
                      success: true,
-                     values: [{42, _clock}]
+                     values: [42],
+                     context: _context
                    },
                    5_000
   end
@@ -161,13 +179,20 @@ defmodule DynamoNodeTest do
       DynamoNode.start(:node, %{foo: 37}, [:node], 1, 1, 1)
     end)
 
-    send(:node, %ClientRequest.Put{nonce: nonce_put, key: :foo, value: 42})
+    send(:node, %ClientRequest.Put{
+      nonce: nonce_put,
+      key: :foo,
+      value: 42,
+      context: %Context{version: VectorClock.new()}
+    })
+
     send(:node, %ClientRequest.Get{nonce: nonce_get, key: :foo})
 
     assert_receive %ClientResponse.Get{
                      nonce: ^nonce_get,
                      success: true,
-                     values: [{42, _clock}]
+                     values: [42],
+                     context: _context
                    },
                    5_000
   end
@@ -191,7 +216,8 @@ defmodule DynamoNodeTest do
       assert_receive %ClientResponse.Get{
                        nonce: ^nonce,
                        success: true,
-                       values: [{^value, _clock}]
+                       values: [^value],
+                       context: _context
                      },
                      5_000
     end
@@ -208,10 +234,15 @@ defmodule DynamoNodeTest do
       end)
     end)
 
-    for {key, value} <- data do
+    for {key, _value} <- data do
       nonce = Nonce.new()
 
-      send(:c, %ClientRequest.Put{nonce: nonce, key: key, value: 100})
+      send(:c, %ClientRequest.Put{
+        nonce: nonce,
+        key: key,
+        value: 100,
+        context: %Context{version: VectorClock.new()}
+      })
     end
 
     # wait a bit for the system to settle
@@ -228,7 +259,8 @@ defmodule DynamoNodeTest do
       assert_receive %ClientResponse.Get{
                        nonce: ^nonce,
                        success: true,
-                       values: [{100, _clock}]
+                       values: [100],
+                       context: _context
                      },
                      5_000
     end

@@ -1,10 +1,3 @@
-defmodule Context do
-  @moduledoc """
-  Context for values in a key-value store.
-  """
-  defstruct(version: nil)
-end
-
 defmodule ClientRequest.Get do
   @moduledoc """
   Message from a client for a `get` request.
