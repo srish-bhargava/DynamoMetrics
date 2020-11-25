@@ -1,3 +1,10 @@
+defmodule Context do
+  @moduledoc """
+  Context for values in a key-value store.
+  """
+  defstruct(version: nil)
+end
+
 defmodule ClientRequest.Get do
   @moduledoc """
   Message from a client for a `get` request.
@@ -13,8 +20,9 @@ defmodule ClientResponse.Get do
   defstruct(
     nonce: nil,
     success: nil,
-    # collection of values and versions
-    values: nil
+    # one or more concurrent values held by the system
+    values: nil,
+    context: nil
   )
 end
 
@@ -25,7 +33,8 @@ defmodule ClientRequest.Put do
   defstruct(
     nonce: nil,
     key: nil,
-    value: nil
+    value: nil,
+    context: nil
   )
 end
 
@@ -36,7 +45,8 @@ defmodule ClientResponse.Put do
   """
   defstruct(
     nonce: nil,
-    success: nil
+    success: nil,
+    context: nil
   )
 end
 
@@ -53,7 +63,8 @@ defmodule CoordinatorResponse.Get do
   """
   defstruct(
     nonce: nil,
-    values: nil
+    values: nil,
+    context: nil
   )
 end
 
@@ -65,7 +76,7 @@ defmodule CoordinatorRequest.Put do
     nonce: nil,
     key: nil,
     value: nil,
-    clock: nil
+    context: nil
   )
 end
 
