@@ -34,7 +34,7 @@ defmodule DynamoNodeTest do
         {:DOWN, ^handle, _, proc, reason} ->
           assert false, "node #{inspect(proc)} crashed (reason: #{reason})"
       after
-        5_000 ->
+        2_000 ->
           true
       end
     end
@@ -54,7 +54,7 @@ defmodule DynamoNodeTest do
         {:DOWN, _handle, _, proc, reason} ->
           assert false, "node #{inspect(proc)} crashed (reason: #{reason})"
       after
-        5_000 ->
+        2_000 ->
           true
       end
     end
@@ -76,7 +76,7 @@ defmodule DynamoNodeTest do
         {:DOWN, _handle, _, proc, reason} ->
           assert false, "node #{inspect(proc)} crashed (reason: #{reason})"
       after
-        5_000 ->
+        2_000 ->
           true
       end
     end
@@ -103,7 +103,7 @@ defmodule DynamoNodeTest do
         {:DOWN, _handle, _, proc, reason} ->
           assert false, "node #{inspect(proc)} crashed (reason: #{reason})"
       after
-        5_000 ->
+        2_000 ->
           true
       end
     end
@@ -270,7 +270,7 @@ defmodule DynamoNodeTest do
     # make sure the node we send to is a valid coordinator
     # by making everyone a valid coordinator
     spawn(:a, fn ->
-      DynamoNode.start(:a, %{foo: 42}, [:a, :b, :c], 3, 3, 1, 1_000)
+      DynamoNode.start(:a, %{foo: 42}, [:a, :b, :c], 3, 3, 3, 500)
     end)
 
     nonce = Nonce.new()
@@ -282,6 +282,30 @@ defmodule DynamoNodeTest do
                      values: nil,
                      context: nil
                    },
-                   2_000
+                   1_000
+  end
+
+  test "Client put request times out after a while when sent to coordinator" do
+    # make sure the node we send to is a valid coordinator
+    # by making everyone a valid coordinator
+    spawn(:a, fn ->
+      DynamoNode.start(:a, %{foo: 42}, [:a, :b, :c], 3, 3, 3, 500)
+    end)
+
+    nonce = Nonce.new()
+
+    send(:a, %ClientRequest.Put{
+      nonce: nonce,
+      key: :foo,
+      value: 49,
+      context: %Context{version: VectorClock.new()}
+    })
+
+    assert_receive %ClientResponse.Put{
+                     nonce: ^nonce,
+                     success: false,
+                     context: nil
+                   },
+                   1_000
   end
 end
