@@ -11,6 +11,9 @@ defmodule Dynamo.MixProject do
       lockfile: "../../mix.lock",
       elixir: "~> 1.10",
       start_permanent: Mix.env() == :prod,
+      dialyzer: [
+        plt_ignore_apps: [:emulation, :ex_hash_ring]
+      ],
       deps: deps()
     ]
   end

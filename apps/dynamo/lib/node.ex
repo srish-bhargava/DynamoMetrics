@@ -23,7 +23,7 @@ defmodule DynamoNode do
 
     # local storage of key-([value], context) pairs
     # only stores concurrent versions
-    field :store, %{required(any()) => any()}
+    field :store, %{required(any()) => {[any()], %Context{}}}
 
     # all nodes in the cluster
     field :nodes, [any()]
@@ -33,9 +33,9 @@ defmodule DynamoNode do
 
     # parameters from dynamo
     # for minimum participants in read/write
-    field :n, integer()
-    field :r, integer()
-    field :w, integer()
+    field :n, pos_integer()
+    field :r, pos_integer()
+    field :w, pos_integer()
 
     # pending client get requests being handled by this node as coordinator.
     # Importantly, if a request has been dispatched to other nodes
@@ -45,7 +45,7 @@ defmodule DynamoNode do
     # responses have already been received and client_nonce purged
     # from this map.
     field :pending_gets, %{
-      required(integer()) => %{
+      required(Nonce.t()) => %{
         client: any(),
         responses: %{required(any()) => {[any()], %Context{}}}
       }
@@ -58,7 +58,7 @@ defmodule DynamoNode do
     # client_nonce be present and map to
     # %{client: client, context: context, responses: []}
     field :pending_puts, %{
-      required(integer()) => %{
+      required(Nonce.t()) => %{
         client: any(),
         context: %Context{},
         responses: MapSet.t(any())
@@ -69,6 +69,15 @@ defmodule DynamoNode do
   @doc """
   Set up node and start serving requests.
   """
+  @spec start(
+          any(),
+          map(),
+          [any()],
+          pos_integer(),
+          pos_integer(),
+          pos_integer()
+        ) ::
+          no_return()
   def start(id, data, nodes, n, r, w) do
     Logger.info("Starting node #{inspect(id)}")
     Logger.metadata(id: id)
@@ -100,6 +109,7 @@ defmodule DynamoNode do
   Get the preference list for a particular key
   (i.e. the top `n` nodes in the ring for this key).
   """
+  @spec get_preference_list(%DynamoNode{}, any()) :: [any()]
   def get_preference_list(state, key) do
     HashRing.find_nodes(state.ring, key, state.n)
   end
@@ -108,6 +118,7 @@ defmodule DynamoNode do
   Get the coordinator for a particular key
   (i.e. the top node in the ring for this key).
   """
+  @spec get_coordinator(%DynamoNode{}, any()) :: any()
   def get_coordinator(state, key) do
     HashRing.find_node(state.ring, key)
   end
@@ -115,6 +126,7 @@ defmodule DynamoNode do
   @doc """
   Listen and serve requests, forever.
   """
+  @spec listener(%DynamoNode{}) :: no_return()
   def listener(state) do
     receive do
       # client requests
@@ -241,6 +253,8 @@ defmodule DynamoNode do
 
   TODO Return failure to client on a timeout?
   """
+  @spec coord_handle_get_req(%DynamoNode{}, any(), %ClientRequest.Get{}) ::
+          %DynamoNode{}
   def coord_handle_get_req(state, client, %ClientRequest.Get{
         nonce: nonce,
         key: key
@@ -265,6 +279,8 @@ defmodule DynamoNode do
   remove this request from `pending_gets` and return all latest values to
   the client.
   """
+  @spec coord_handle_get_resp(%DynamoNode{}, any(), %CoordinatorResponse.Get{}) ::
+          %DynamoNode{}
   def coord_handle_get_resp(state, node, %CoordinatorResponse.Get{
         nonce: nonce,
         values: values,
@@ -341,6 +357,8 @@ defmodule DynamoNode do
 
   TODO Return failure to client on a timeout?
   """
+  @spec coord_handle_put_req(%DynamoNode{}, any(), %ClientRequest.Put{}) ::
+          %DynamoNode{}
   def coord_handle_put_req(state, client, %ClientRequest.Put{
         nonce: nonce,
         key: key,
@@ -396,6 +414,8 @@ defmodule DynamoNode do
   remove this request from `pending_puts` and return all latest values to
   the client.
   """
+  @spec coord_handle_put_resp(%DynamoNode{}, any(), %CoordinatorResponse.Put{}) ::
+          %DynamoNode{}
   def coord_handle_put_resp(state, node, %CoordinatorResponse.Put{
         nonce: nonce
       }) do
@@ -450,6 +470,7 @@ defmodule DynamoNode do
   Add `key`-`value` association to local storage,
   squashing any outdated versions.
   """
+  @spec put(%DynamoNode{}, any(), any(), %Context{}) :: %DynamoNode{}
   def put(state, key, value, context) do
     Logger.debug("Writing #{inspect(value)} to key #{inspect(key)}")
 
@@ -466,6 +487,8 @@ defmodule DynamoNode do
   @doc """
   Utility function to remove outdated values from a list of {value, clock} pairs.
   """
+  @spec merge_values({[any()], %Context{}}, {[any()], %Context{}}) ::
+          {[any()], %Context{}}
   def merge_values({vals1, context1} = value1, {vals2, context2} = value2) do
     case VectorClock.compare(context1.version, context2.version) do
       :before ->

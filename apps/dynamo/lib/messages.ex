@@ -5,7 +5,7 @@ defmodule Context do
     @typedoc """
     Context for values in a key-value store.
     """
-    field :version, %{required(any()) => integer()}
+    field :version, VectorClock.t()
   end
 end
 
@@ -16,7 +16,7 @@ defmodule ClientRequest.Get do
     @typedoc """
     Message from a client for a `get` request.
     """
-    field :nonce, integer()
+    field :nonce, Nonce.t()
     field :key, any()
   end
 end
@@ -29,7 +29,7 @@ defmodule ClientResponse.Get do
     Message from a dynamo node to a client in response
     to a `get` request.
     """
-    field :nonce, integer()
+    field :nonce, Nonce.t()
     field :success, boolean()
     # one or more concurrent values held by the system
     field :values, [any()]
@@ -44,7 +44,7 @@ defmodule ClientRequest.Put do
     @typedoc """
     Message from a client for a `put` request.
     """
-    field :nonce, integer()
+    field :nonce, Nonce.t()
     field :key, any()
     field :value, any()
     field :context, %Context{}
@@ -59,7 +59,7 @@ defmodule ClientResponse.Put do
     Message from a dynamo node to a client in response
     to a `put` request.
     """
-    field :nonce, integer()
+    field :nonce, Nonce.t()
     field :success, boolean()
     field :context, %Context{}
   end
@@ -72,7 +72,7 @@ defmodule CoordinatorRequest.Get do
     @typedoc """
     Message from a coordinator to a dynamo node to `get` a key.
     """
-    field :nonce, integer()
+    field :nonce, Nonce.t()
     field :key, any()
   end
 end
@@ -84,7 +84,7 @@ defmodule CoordinatorResponse.Get do
     @typedoc """
     Message from a dynamo node to a coordinator in response to a `get`.
     """
-    field :nonce, integer()
+    field :nonce, Nonce.t()
     field :values, [any()]
     field :context, %Context{}
   end
@@ -97,7 +97,7 @@ defmodule CoordinatorRequest.Put do
     @typedoc """
     Message from a coordinator to a dynamo node to `put` a key=value.
     """
-    field :nonce, integer()
+    field :nonce, Nonce.t()
     field :key, any()
     field :value, any()
     field :context, %Context{}
@@ -111,7 +111,7 @@ defmodule CoordinatorResponse.Put do
     @typedoc """
     Message from a dynamo node to a coordinator in response to a `put`.
     """
-    field :nonce, integer()
+    field :nonce, Nonce.t()
   end
 end
 

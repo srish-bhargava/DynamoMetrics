@@ -9,13 +9,11 @@ defmodule DynamoMetrics.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       dialyzer: [
-        plt_add_deps: :apps_direct,
+        plt_ignore_apps: [:emulation, :ex_hash_ring],
         flags: [
           :unmatched_returns,
           :error_handling,
-          :race_conditions,
-          :underspecs,
-          :unknown
+          :race_conditions
         ]
       ]
     ]

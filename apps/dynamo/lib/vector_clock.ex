@@ -3,12 +3,15 @@ defmodule VectorClock do
   Logical vector clocks for managing versions.
   """
 
+  @type t() :: %{required(any()) => non_neg_integer()}
+
   @doc """
   Return a new, empty, vector clock.
 
       iex> VectorClock.new()
       %{}
   """
+  @spec new() :: t()
   def new() do
     %{}
   end
@@ -24,6 +27,7 @@ defmodule VectorClock do
       iex> VectorClock.combine(%{a: 1, b: 0, c: 3}, %{a: 5, b: 2, c: 1, d: 9})
       %{a: 5, b: 2, c: 3, d: 9}
   """
+  @spec combine(t(), t()) :: t()
   def combine(current, received) do
     Map.merge(current, received, fn _k, c, r -> max(c, r) end)
   end
@@ -37,6 +41,7 @@ defmodule VectorClock do
       iex> VectorClock.tick(%{a: 1, b: 0, c: 3}, :b)
       %{a: 1, b: 1, c: 3}
   """
+  @spec tick(t(), any()) :: t()
   def tick(clock, proc) do
     Map.update(clock, proc, 1, &(&1 + 1))
   end
@@ -63,6 +68,7 @@ defmodule VectorClock do
       iex> VectorClock.compare(%{a: 4, b: 7}, %{a: 5, b: 7})
       :before
   """
+  @spec compare(t(), t()) :: :before | :after | :concurrent
   def compare(clock_1, clock_2) do
     keys =
       MapSet.union(MapSet.new(Map.keys(clock_1)), MapSet.new(Map.keys(clock_2)))
@@ -106,6 +112,7 @@ defmodule VectorClock do
       iex> VectorClock.before?(%{a: 4, b: 2, c: 2}, %{a: 5, b: 7})
       false
   """
+  @spec before?(t(), t()) :: boolean()
   def before?(clock_1, clock_2) do
     compare(clock_1, clock_2) == :before
   end
@@ -125,6 +132,7 @@ defmodule VectorClock do
       iex> VectorClock.after?(%{a: 5, b: 7}, %{a: 4, b: 2, c: 2})
       false
   """
+  @spec after?(t(), t()) :: boolean()
   def after?(clock_1, clock_2) do
     compare(clock_1, clock_2) == :after
   end
@@ -141,6 +149,7 @@ defmodule VectorClock do
       iex> VectorClock.concurrent?(%{a: 5, b: 7}, %{a: 4, b: 2, c: 2})
       true
   """
+  @spec concurrent?(t(), t()) :: boolean()
   def concurrent?(clock_1, clock_2) do
     compare(clock_1, clock_2) == :concurrent
   end

@@ -14,6 +14,8 @@ defmodule Cluster do
   @doc """
   Start a dynamo cluster.
   """
+  @spec start(map(), [any()], pos_integer(), pos_integer(), pos_integer()) ::
+          :ok
   def start(data, nodes, n, r, w) do
     Enum.each(nodes, fn node ->
       spawn(node, fn ->

@@ -10,6 +10,7 @@ defmodule Client do
   @doc """
   Contact a node to get the value of a key.
   """
+  @spec get(any(), any()) :: %ClientResponse.Get{}
   def get(node, key) do
     nonce = Nonce.new()
 
@@ -30,6 +31,7 @@ defmodule Client do
   @doc """
   Contact a node to insert/replace the value of a key.
   """
+  @spec put(any(), any(), %Context{}, any()) :: %ClientResponse.Put{}
   def put(node, key, context, value) do
     nonce = Nonce.new()
 
