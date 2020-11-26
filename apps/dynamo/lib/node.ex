@@ -106,8 +106,6 @@ defmodule DynamoNode do
       pending_puts: %{}
     }
 
-    # TODO start anti-entropy in a background process
-
     listener(state)
   end
 
@@ -135,6 +133,12 @@ defmodule DynamoNode do
   @spec listener(%DynamoNode{}) :: no_return()
   def listener(state) do
     receive do
+      # crash
+      {_from, :crash} = msg ->
+        Logger.info("Received #{inspect(msg)}")
+        state = crash(state)
+        listener(state)
+
       # client requests
       {client, %ClientRequest.Get{key: key} = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(client)}")
@@ -567,5 +571,32 @@ defmodule DynamoNode do
            version: VectorClock.combine(context1.version, context2.version)
          }}
     end
+  end
+
+  @doc """
+  Simulate a node crash.
+  Wipe transient data and wait for a :recover message.
+  """
+  @spec crash(%DynamoNode{}) :: %DynamoNode{}
+  def crash(state) do
+    wiped_state = %DynamoNode{
+      id: state.id,
+      store: state.store,
+      nodes: state.nodes,
+      ring: state.ring,
+      n: state.n,
+      r: state.r,
+      w: state.w,
+      coordinator_timeout: state.coordinator_timeout,
+      pending_gets: %{},
+      pending_puts: %{}
+    }
+
+    receive do
+      {_from, :recover} = msg ->
+        Logger.info("Received #{inspect(msg)}")
+    end
+
+    wiped_state
   end
 end

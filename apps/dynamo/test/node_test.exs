@@ -308,4 +308,29 @@ defmodule DynamoNodeTest do
                    },
                    1_000
   end
+
+  test "Crashed coordinator node doesn't respond to anything" do
+    spawn(:a, fn ->
+      DynamoNode.start(:a, %{foo: 42}, [:a], 1, 1, 1, 500)
+    end)
+
+    send(:a, :crash)
+
+    send(:a, %ClientRequest.Get{nonce: Nonce.new(), key: :foo})
+
+    refute_receive msg,
+                   1_000,
+                   "Received response (#{inspect(msg)}) for get request"
+
+    send(:a, %ClientRequest.Put{
+      nonce: Nonce.new(),
+      key: :foo,
+      value: 49,
+      context: %Context{version: VectorClock.new()}
+    })
+
+    refute_receive msg,
+                   1_000,
+                   "Received response (#{inspect(msg)}) for put request"
+  end
 end
