@@ -8,8 +8,15 @@ defmodule DynamoMetrics.MixProject do
       version: "0.1.0",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
-      dializer: [
-        plt_add_deps: :apps_direct
+      dialyzer: [
+        plt_add_deps: :apps_direct,
+        flags: [
+          :unmatched_returns,
+          :error_handling,
+          :race_conditions,
+          :underspecs,
+          :unknown
+        ]
       ]
     ]
   end

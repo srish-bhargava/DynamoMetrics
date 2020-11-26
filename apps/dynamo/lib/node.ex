@@ -1,14 +1,9 @@
-defmodule Context do
-  @moduledoc """
-  Context for values in a key-value store.
-  """
-  defstruct(version: nil)
-end
-
 defmodule DynamoNode do
   @moduledoc """
   A replica node in a DynamoDB cluster.
   """
+
+  use TypedStruct
 
   alias ExHashRing.HashRing
 
@@ -22,41 +17,54 @@ defmodule DynamoNode do
   require Logger
 
   # The state of each node
-  defstruct(
+  typedstruct enforce: true do
     # node id
-    id: nil,
+    field :id, any()
+
     # local storage of key-([value], context) pairs
     # only stores concurrent versions
-    store: nil,
+    field :store, %{required(any()) => any()}
+
     # all nodes in the cluster
-    nodes: nil,
+    field :nodes, [any()]
+
     # hash ring
-    ring: nil,
+    field :ring, ExHashRing.HashRing.t()
+
     # parameters from dynamo
     # for minimum participants in read/write
-    n: nil,
-    r: nil,
-    w: nil,
-    # pending client get requests being handled
-    # by this node as coordinator.
-    # `pending_gets` is of the form:
-    # %{client_nonce => %{client: client, responses: %{node => ([value], %Context{})}}}
+    field :n, integer()
+    field :r, integer()
+    field :w, integer()
+
+    # pending client get requests being handled by this node as coordinator.
     # Importantly, if a request has been dispatched to other nodes
     # but no coordinator responses have been received yet, then the
     # appropriate client_nonce WILL BE PRESENT and will map to {client, %{}}.
     # This helps distinguish this case with the case when an enough
     # responses have already been received and client_nonce purged
     # from this map.
-    pending_gets: nil,
+    field :pending_gets, %{
+      required(integer()) => %{
+        client: any(),
+        responses: %{required(any()) => {[any()], %Context{}}}
+      }
+    }
+
     # pending client put requests being handled
     # by this node as coordinator.
-    # `pending_puts` is of the form:
-    # %{client_nonce => %{client: client, context: %Context{}, responses: MapSet(node)}}
     # Similar to `pending_gets`, a request that's pending but for which
     # no coordinator responses have been received yet WILL have its
-    # client_nonce be present and map to %{client: client, responses: []}
-    pending_puts: nil
-  )
+    # client_nonce be present and map to
+    # %{client: client, context: context, responses: []}
+    field :pending_puts, %{
+      required(integer()) => %{
+        client: any(),
+        context: %Context{},
+        responses: MapSet.t(any())
+      }
+    }
+  end
 
   @doc """
   Set up node and start serving requests.

@@ -1,91 +1,128 @@
+defmodule Context do
+  use TypedStruct
+
+  typedstruct enforce: true do
+    @typedoc """
+    Context for values in a key-value store.
+    """
+    field :version, %{required(any()) => integer()}
+  end
+end
+
 defmodule ClientRequest.Get do
-  @moduledoc """
-  Message from a client for a `get` request.
-  """
-  defstruct(nonce: nil, key: nil)
+  use TypedStruct
+
+  typedstruct enforce: true do
+    @typedoc """
+    Message from a client for a `get` request.
+    """
+    field :nonce, integer()
+    field :key, any()
+  end
 end
 
 defmodule ClientResponse.Get do
-  @moduledoc """
-  Message from a dynamo node to a client in response
-  to a `get` request.
-  """
-  defstruct(
-    nonce: nil,
-    success: nil,
+  use TypedStruct
+
+  typedstruct enforce: true do
+    @typedoc """
+    Message from a dynamo node to a client in response
+    to a `get` request.
+    """
+    field :nonce, integer()
+    field :success, boolean()
     # one or more concurrent values held by the system
-    values: nil,
-    context: nil
-  )
+    field :values, [any()]
+    field :context, %Context{}
+  end
 end
 
 defmodule ClientRequest.Put do
-  @moduledoc """
-  Message from a client for a `put` request.
-  """
-  defstruct(
-    nonce: nil,
-    key: nil,
-    value: nil,
-    context: nil
-  )
+  use TypedStruct
+
+  typedstruct enforce: true do
+    @typedoc """
+    Message from a client for a `put` request.
+    """
+    field :nonce, integer()
+    field :key, any()
+    field :value, any()
+    field :context, %Context{}
+  end
 end
 
 defmodule ClientResponse.Put do
-  @moduledoc """
-  Message from a dynamo node to a client in response
-  to a `put` request.
-  """
-  defstruct(
-    nonce: nil,
-    success: nil,
-    context: nil
-  )
+  use TypedStruct
+
+  typedstruct enforce: true do
+    @typedoc """
+    Message from a dynamo node to a client in response
+    to a `put` request.
+    """
+    field :nonce, integer()
+    field :success, boolean()
+    field :context, %Context{}
+  end
 end
 
 defmodule CoordinatorRequest.Get do
-  @moduledoc """
-  Message from a coordinator to a dynamo node to `get` a key.
-  """
-  defstruct(nonce: nil, key: nil)
+  use TypedStruct
+
+  typedstruct enforce: true do
+    @typedoc """
+    Message from a coordinator to a dynamo node to `get` a key.
+    """
+    field :nonce, integer()
+    field :key, any()
+  end
 end
 
 defmodule CoordinatorResponse.Get do
-  @moduledoc """
-  Message from a dynamo node to a coordinator in response to a `get`.
-  """
-  defstruct(
-    nonce: nil,
-    values: nil,
-    context: nil
-  )
+  use TypedStruct
+
+  typedstruct enforce: true do
+    @typedoc """
+    Message from a dynamo node to a coordinator in response to a `get`.
+    """
+    field :nonce, integer()
+    field :values, [any()]
+    field :context, %Context{}
+  end
 end
 
 defmodule CoordinatorRequest.Put do
-  @moduledoc """
-  Message from a coordinator to a dynamo node to `put` a key=value.
-  """
-  defstruct(
-    nonce: nil,
-    key: nil,
-    value: nil,
-    context: nil
-  )
+  use TypedStruct
+
+  typedstruct enforce: true do
+    @typedoc """
+    Message from a coordinator to a dynamo node to `put` a key=value.
+    """
+    field :nonce, integer()
+    field :key, any()
+    field :value, any()
+    field :context, %Context{}
+  end
 end
 
 defmodule CoordinatorResponse.Put do
-  @moduledoc """
-  Message from a dynamo node to a coordinator in response to a `put`.
-  """
-  defstruct(nonce: nil)
+  use TypedStruct
+
+  typedstruct enforce: true do
+    @typedoc """
+    Message from a dynamo node to a coordinator in response to a `put`.
+    """
+    field :nonce, integer()
+  end
 end
 
 defmodule RedirectedClientRequest do
-  @moduledoc """
-  A redirected client request.
-  """
-  defstruct(
-    client: nil,
-    request: nil
-  )
+  use TypedStruct
+
+  typedstruct enforce: true do
+    @typedoc """
+    A redirected client request.
+    """
+    field :client, any()
+    field :request, %ClientRequest.Get{} | %ClientRequest.Put{}
+  end
 end
