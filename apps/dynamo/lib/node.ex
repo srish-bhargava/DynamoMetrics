@@ -37,6 +37,10 @@ defmodule DynamoNode do
     field :r, pos_integer()
     field :w, pos_integer()
 
+    # Number of milliseconds for which a coordinator should
+    # wait for responses to client requests.
+    field :coordinator_timeout, pos_integer()
+
     # pending client get requests being handled by this node as coordinator.
     # Importantly, if a request has been dispatched to other nodes
     # but no coordinator responses have been received yet, then the
@@ -75,10 +79,11 @@ defmodule DynamoNode do
           [any()],
           pos_integer(),
           pos_integer(),
+          pos_integer(),
           pos_integer()
         ) ::
           no_return()
-  def start(id, data, nodes, n, r, w) do
+  def start(id, data, nodes, n, r, w, coordinator_timeout) do
     Logger.info("Starting node #{inspect(id)}")
     Logger.metadata(id: id)
 
@@ -96,6 +101,7 @@ defmodule DynamoNode do
       n: n,
       r: r,
       w: w,
+      coordinator_timeout: coordinator_timeout,
       pending_gets: %{},
       pending_puts: %{}
     }
@@ -231,6 +237,52 @@ defmodule DynamoNode do
 
         state = coord_handle_put_resp(state, node, msg)
         listener(state)
+
+      # timeouts
+      {:coordinator_timeout, :get, nonce} = msg ->
+        Logger.info("Received #{inspect(msg)}")
+        req_state = Map.get(state.pending_gets, nonce)
+
+        if req_state == nil do
+          # request has already been dealt with, ignore
+          listener(state)
+        else
+          # request timed out, get rid of the pending entry
+          # and respond failure to client
+          send(req_state.client, %ClientResponse.Get{
+            nonce: nonce,
+            success: false,
+            values: nil,
+            context: nil
+          })
+
+          listener(%{
+            state
+            | pending_gets: Map.delete(state.pending_gets, nonce)
+          })
+        end
+
+      {:coordinator_timeout, :put, nonce} = msg ->
+        Logger.info("Received #{inspect(msg)}")
+        req_state = Map.get(state.pending_puts, nonce)
+
+        if req_state == nil do
+          # request has already been dealt with, ignore
+          listener(state)
+        else
+          # request timed out, get rid of the pending entry
+          # and respond failure to client
+          send(req_state.client, %ClientResponse.Put{
+            nonce: nonce,
+            success: false,
+            context: nil
+          })
+
+          listener(%{
+            state
+            | pending_puts: Map.delete(state.pending_puts, nonce)
+          })
+        end
     end
   end
 
@@ -265,6 +317,9 @@ defmodule DynamoNode do
       # DO send get request to self
       send(node, %CoordinatorRequest.Get{nonce: nonce, key: key})
     end)
+
+    # start timer for the responses
+    timer(state.coordinator_timeout, {:coordinator_timeout, :get, nonce})
 
     %{
       state
@@ -395,7 +450,9 @@ defmodule DynamoNode do
 
       state
     else
-      # otherwise, mark pending
+      # otherwise, start timer for the responses and mark pending
+      timer(state.coordinator_timeout, {:coordinator_timeout, :put, nonce})
+
       %{
         state
         | pending_puts:

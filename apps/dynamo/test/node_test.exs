@@ -26,7 +26,7 @@ defmodule DynamoNodeTest do
       handle =
         Process.monitor(
           spawn(:node, fn ->
-            DynamoNode.start(:node, %{}, [:node], 1, 1, 1)
+            DynamoNode.start(:node, %{}, [:node], 1, 1, 1, 1_000)
           end)
         )
 
@@ -45,7 +45,7 @@ defmodule DynamoNodeTest do
       for node <- nodes do
         Process.monitor(
           spawn(node, fn ->
-            DynamoNode.start(node, %{}, nodes, 1, 1, 1)
+            DynamoNode.start(node, %{}, nodes, 1, 1, 1, 1_000)
           end)
         )
       end
@@ -65,7 +65,7 @@ defmodule DynamoNodeTest do
       for node <- nodes do
         Process.monitor(
           spawn(node, fn ->
-            DynamoNode.start(node, %{foo: 42}, nodes, 1, 1, 1)
+            DynamoNode.start(node, %{foo: 42}, nodes, 1, 1, 1, 1_000)
           end)
         )
       end
@@ -87,7 +87,7 @@ defmodule DynamoNodeTest do
       for node <- nodes do
         Process.monitor(
           spawn(node, fn ->
-            DynamoNode.start(node, %{foo: 42}, nodes, 1, 1, 1)
+            DynamoNode.start(node, %{foo: 42}, nodes, 1, 1, 1, 1_000)
           end)
         )
       end
@@ -113,7 +113,7 @@ defmodule DynamoNodeTest do
     nonce = Nonce.new()
 
     spawn(:node, fn ->
-      DynamoNode.start(:node, %{foo: 42}, [:node], 1, 1, 1)
+      DynamoNode.start(:node, %{foo: 42}, [:node], 1, 1, 1, 1_000)
     end)
 
     send(:node, %ClientRequest.Get{nonce: nonce, key: :foo})
@@ -131,7 +131,7 @@ defmodule DynamoNodeTest do
     nonce = Nonce.new()
 
     spawn(:node, fn ->
-      DynamoNode.start(:node, %{}, [:node], 1, 1, 1)
+      DynamoNode.start(:node, %{}, [:node], 1, 1, 1, 1_000)
     end)
 
     send(:node, %ClientRequest.Put{
@@ -150,7 +150,7 @@ defmodule DynamoNodeTest do
     nonce_get = Nonce.new()
 
     spawn(:node, fn ->
-      DynamoNode.start(:node, %{}, [:node], 1, 1, 1)
+      DynamoNode.start(:node, %{}, [:node], 1, 1, 1, 1_000)
     end)
 
     send(:node, %ClientRequest.Put{
@@ -176,7 +176,7 @@ defmodule DynamoNodeTest do
     nonce_get = Nonce.new()
 
     spawn(:node, fn ->
-      DynamoNode.start(:node, %{foo: 37}, [:node], 1, 1, 1)
+      DynamoNode.start(:node, %{foo: 37}, [:node], 1, 1, 1, 1_000)
     end)
 
     send(:node, %ClientRequest.Put{
@@ -204,7 +204,7 @@ defmodule DynamoNodeTest do
 
     Enum.each(nodes, fn node ->
       spawn(node, fn ->
-        DynamoNode.start(node, data, nodes, 4, 3, 2)
+        DynamoNode.start(node, data, nodes, 4, 3, 2, 1_000)
       end)
     end)
 
@@ -230,7 +230,7 @@ defmodule DynamoNodeTest do
 
     Enum.each(nodes, fn node ->
       spawn(node, fn ->
-        DynamoNode.start(node, data, nodes, 4, 3, 2)
+        DynamoNode.start(node, data, nodes, 4, 3, 2, 1_000)
       end)
     end)
 
@@ -264,5 +264,24 @@ defmodule DynamoNodeTest do
                      },
                      5_000
     end
+  end
+
+  test "Client get request times out after a while when sent to coordinator" do
+    # make sure the node we send to is a valid coordinator
+    # by making everyone a valid coordinator
+    spawn(:a, fn ->
+      DynamoNode.start(:a, %{foo: 42}, [:a, :b, :c], 3, 3, 1, 1_000)
+    end)
+
+    nonce = Nonce.new()
+    send(:a, %ClientRequest.Get{nonce: nonce, key: :foo})
+
+    assert_receive %ClientResponse.Get{
+                     nonce: ^nonce,
+                     success: false,
+                     values: nil,
+                     context: nil
+                   },
+                   2_000
   end
 end

@@ -32,8 +32,8 @@ defmodule ClientResponse.Get do
     field :nonce, Nonce.t()
     field :success, boolean()
     # one or more concurrent values held by the system
-    field :values, [any()]
-    field :context, %Context{}
+    field :values, [any()] | nil
+    field :context, %Context{} | nil
   end
 end
 
@@ -61,7 +61,7 @@ defmodule ClientResponse.Put do
     """
     field :nonce, Nonce.t()
     field :success, boolean()
-    field :context, %Context{}
+    field :context, %Context{} | nil
   end
 end
 
