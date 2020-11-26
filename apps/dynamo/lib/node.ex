@@ -115,12 +115,12 @@ defmodule DynamoNode do
   end
 
   @doc """
-  Get the coordinator for a particular key
-  (i.e. the top node in the ring for this key).
+  Check if this node is a valid coordinator for a particular key
+  (i.e. in the top `n` for this key).
   """
-  @spec get_coordinator(%DynamoNode{}, any()) :: any()
-  def get_coordinator(state, key) do
-    HashRing.find_node(state.ring, key)
+  @spec is_valid_coordinator(%DynamoNode{}, any()) :: any()
+  def is_valid_coordinator(state, key) do
+    Enum.member?(get_preference_list(state, key), state.id)
   end
 
   @doc """
@@ -133,14 +133,15 @@ defmodule DynamoNode do
       {client, %ClientRequest.Get{key: key} = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(client)}")
 
-        coordinator = get_coordinator(state, key)
-
-        if coordinator != state.id do
+        if not is_valid_coordinator(state, key) do
           # we are not the coordinator, so redirect to them
-          send(coordinator, %RedirectedClientRequest{
-            client: client,
-            request: msg
-          })
+          send(
+            Enum.at(get_preference_list(state, key), 0),
+            %RedirectedClientRequest{
+              client: client,
+              request: msg
+            }
+          )
 
           listener(state)
         else
@@ -152,14 +153,15 @@ defmodule DynamoNode do
       {client, %ClientRequest.Put{key: key} = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(client)}")
 
-        coordinator = get_coordinator(state, key)
-
-        if coordinator != state.id do
+        if not is_valid_coordinator(state, key) do
           # we are not the coordinator, so redirect to them
-          send(coordinator, %RedirectedClientRequest{
-            client: client,
-            request: msg
-          })
+          send(
+            Enum.at(get_preference_list(state, key), 0),
+            %RedirectedClientRequest{
+              client: client,
+              request: msg
+            }
+          )
 
           listener(state)
         else
