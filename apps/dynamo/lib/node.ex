@@ -573,6 +573,17 @@ defmodule DynamoNode do
     end
   end
 
+  # wait for a :recover msg, ignoring all others
+  defp crash_wait_loop do
+    receive do
+      {_from, :recover} = msg ->
+        Logger.info("Received #{inspect(msg)}")
+
+      _other_msg ->
+        crash_wait_loop()
+    end
+  end
+
   @doc """
   Simulate a node crash.
   Wipe transient data and wait for a :recover message.
@@ -592,10 +603,7 @@ defmodule DynamoNode do
       pending_puts: %{}
     }
 
-    receive do
-      {_from, :recover} = msg ->
-        Logger.info("Received #{inspect(msg)}")
-    end
+    crash_wait_loop()
 
     wiped_state
   end
