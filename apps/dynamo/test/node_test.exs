@@ -411,4 +411,20 @@ defmodule DynamoNodeTest do
                    1_000,
                    "Received response (#{inspect(msg)}) for some request"
   end
+
+  test "Crashed node responds to messages after recovery" do
+    spawn(:a, fn ->
+      DynamoNode.start(:a, %{foo: 42}, [:a], 1, 1, 1, 500)
+    end)
+
+    send(:a, :crash)
+    send(:a, :recover)
+
+    send(:a, %ClientRequest.Get{
+      nonce: Nonce.new(),
+      key: :foo
+    })
+
+    assert_receive _msg, 1_000
+  end
 end
