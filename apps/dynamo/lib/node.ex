@@ -25,8 +25,10 @@ defmodule DynamoNode do
     # only stores concurrent versions
     field :store, %{required(any()) => {[any()], %Context{}}}
 
-    # all nodes in the cluster
-    field :nodes, [any()]
+    # perceived liveness status of all nodes in the cluster
+    # (except the current node)
+    # i.e. is this node alive or (transiently) dead?
+    field :nodes_alive, %{required(any()) => boolean()}
 
     # hash ring
     field :ring, ExHashRing.HashRing.t()
@@ -93,10 +95,15 @@ defmodule DynamoNode do
         {k, {[v], %Context{version: VectorClock.new()}}}
       end)
 
+    nodes_alive =
+      nodes
+      |> Enum.reject(fn node -> node == id end)
+      |> Map.new(fn node -> {node, true} end)
+
     state = %DynamoNode{
       id: id,
       store: store,
-      nodes: nodes,
+      nodes_alive: nodes_alive,
       ring: HashRing.new(nodes, 1),
       n: n,
       r: r,
@@ -593,7 +600,8 @@ defmodule DynamoNode do
     wiped_state = %DynamoNode{
       id: state.id,
       store: state.store,
-      nodes: state.nodes,
+      nodes_alive:
+        Map.new(state.nodes_alive, fn {node, _alive} -> {node, true} end),
       ring: state.ring,
       n: state.n,
       r: state.r,
