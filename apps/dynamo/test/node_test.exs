@@ -19,9 +19,7 @@ defmodule DynamoNodeTest do
     # TLDR: not calling Emulation.terminate() makes me uneasy, but not enough
     #       to do it in every test.
 
-    # register own name so we:
-    # 1. don't have to look at an ugly pid in the logs
-    # 2. can use it in a list of nodes
+    # register own name so we can use it in a list of nodes
     # (needs to implement String.chars, and pid doesn't)
     Process.register(self(), :test_proc)
 
@@ -358,6 +356,56 @@ defmodule DynamoNodeTest do
         nonce: Nonce.new()
       })
     end)
+
+    refute_receive msg,
+                   1_000,
+                   "Received response (#{inspect(msg)}) for some request"
+  end
+
+  test "Node doesn't respond after recovery to msgs received during crash" do
+    data = Map.new(1..10, fn k -> {k, k} end)
+
+    spawn(:a, fn ->
+      DynamoNode.start(:a, data, [:a, :test_proc], 1, 1, 1, 500)
+    end)
+
+    send(:a, :crash)
+
+    Enum.each(data, fn {key, _value} ->
+      # try sending every message
+      send(:a, %ClientRequest.Get{nonce: Nonce.new(), key: key})
+
+      send(:a, %ClientRequest.Put{
+        nonce: Nonce.new(),
+        key: key,
+        value: :new,
+        context: %Context{version: %{a: 999}}
+      })
+
+      send(:a, %CoordinatorRequest.Get{
+        nonce: Nonce.new(),
+        key: key
+      })
+
+      send(:a, %CoordinatorRequest.Put{
+        nonce: Nonce.new(),
+        key: key,
+        value: :new,
+        context: %Context{version: %{a: 999}}
+      })
+
+      send(:a, %CoordinatorResponse.Get{
+        nonce: Nonce.new(),
+        values: [:new_1, :new_2],
+        context: %Context{version: %{a: 999}}
+      })
+
+      send(:a, %CoordinatorResponse.Put{
+        nonce: Nonce.new()
+      })
+    end)
+
+    send(:a, :recover)
 
     refute_receive msg,
                    1_000,

@@ -586,7 +586,8 @@ defmodule DynamoNode do
       {_from, :recover} = msg ->
         Logger.info("Received #{inspect(msg)}")
 
-      _other_msg ->
+      other_msg ->
+        Logger.info("Dead, ignoring #{inspect(other_msg)}")
         crash_wait_loop()
     end
   end
