@@ -20,13 +20,23 @@ defmodule Cluster do
           pos_integer(),
           pos_integer(),
           pos_integer(),
+          pos_integer(),
           pos_integer()
         ) ::
           :ok
-  def start(data, nodes, n, r, w, client_timeout) do
+  def start(data, nodes, n, r, w, client_timeout, request_timeout) do
     Enum.each(nodes, fn node ->
       spawn(node, fn ->
-        DynamoNode.start(node, data, nodes, n, r, w, client_timeout)
+        DynamoNode.start(
+          node,
+          data,
+          nodes,
+          n,
+          r,
+          w,
+          client_timeout,
+          request_timeout
+        )
       end)
     end)
   end

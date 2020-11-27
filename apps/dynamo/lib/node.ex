@@ -43,6 +43,10 @@ defmodule DynamoNode do
     # should wait before failing a client request
     field :client_timeout, pos_integer()
 
+    # Number of milliseconds a node should wait for
+    # a response from another node
+    field :request_timeout, pos_integer()
+
     # pending client get requests being handled by this node as coordinator.
     # Importantly, if a request has been dispatched to other nodes
     # but no coordinator responses have been received yet, then the
@@ -82,10 +86,11 @@ defmodule DynamoNode do
           pos_integer(),
           pos_integer(),
           pos_integer(),
+          pos_integer(),
           pos_integer()
         ) ::
           no_return()
-  def start(id, data, nodes, n, r, w, client_timeout) do
+  def start(id, data, nodes, n, r, w, client_timeout, request_timeout) do
     Logger.info("Starting node #{inspect(id)}")
     Logger.metadata(id: id)
 
@@ -109,6 +114,7 @@ defmodule DynamoNode do
       r: r,
       w: w,
       client_timeout: client_timeout,
+      request_timeout: request_timeout,
       pending_gets: %{},
       pending_puts: %{}
     }
@@ -608,6 +614,7 @@ defmodule DynamoNode do
       r: state.r,
       w: state.w,
       client_timeout: state.client_timeout,
+      request_timeout: state.request_timeout,
       pending_gets: %{},
       pending_puts: %{}
     }
