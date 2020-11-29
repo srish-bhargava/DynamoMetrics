@@ -126,3 +126,26 @@ defmodule RedirectedClientRequest do
     field :request, %ClientRequest.Get{} | %ClientRequest.Put{}
   end
 end
+
+defmodule TestRequest do
+  use TypedStruct
+
+  typedstruct enforce: true do
+    @typedoc """
+    Message for retrieving information for tests.
+    """
+    field :nonce, Nonce.t()
+  end
+end
+
+defmodule TestResponse do
+  use TypedStruct
+
+  typedstruct enforce: true do
+    @typedoc """
+    Message for retrieving information for tests.
+    """
+    field :nonce, Nonce.t()
+    field :state, %DynamoNode{}
+  end
+end

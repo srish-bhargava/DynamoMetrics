@@ -329,6 +329,16 @@ defmodule DynamoNode do
         }
 
         listener(state)
+
+      # testing
+      {from, %TestRequest{nonce: nonce}} ->
+        # respond with our current state
+        send(from, %TestResponse{
+          nonce: nonce,
+          state: state
+        })
+
+        listener(state)
     end
   end
 
