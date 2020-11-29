@@ -442,15 +442,28 @@ defmodule DynamoNodeTest do
     end
   end
 
-  test "All nodes consider crashed node dead after lots of traffic" do
-    nodes = [:a, :b, :c]
-    data = Map.new(1..1000, fn key -> {key, key * 42} end)
-
-    Cluster.start(data, [:gonna_crash | nodes], 3, 3, 3, 1_000, 200)
+  test "Coordinator considers crashed node dead after coord requests" do
+    Cluster.start(%{foo: 42}, [:a, :gonna_crash], 2, 2, 2, 1_000, 200)
 
     send(:gonna_crash, :crash)
 
     # generate lots of traffic
+    send(:a, %ClientRequest.Get{
+      nonce: Nonce.new(),
+      key: :foo
+    })
+
+    # wait for the dust to settle
+    receive do
+    after
+      1_200 -> true
+    end
+
+    nonce = Nonce.new()
+    send(:a, %TestRequest{nonce: nonce})
+    assert_receive %TestResponse{nonce: ^nonce, state: state}, 500
+    assert state.nodes_alive == %{gonna_crash: false}
+  end
     Enum.each(data, fn {key, _val} ->
       send(:a, %ClientRequest.Get{
         nonce: Nonce.new(),
