@@ -8,7 +8,7 @@ defmodule DynamoNode do
   alias ExHashRing.HashRing
 
   # override Kernel's functions with Emulation's
-  import Emulation, only: [send: 2, timer: 2]
+  import Emulation, only: [send: 2, timer: 2, cancel_timer: 1]
 
   import Kernel,
     except: [spawn: 3, spawn: 1, spawn_link: 1, spawn_link: 3, send: 2]
@@ -29,6 +29,10 @@ defmodule DynamoNode do
     # (except the current node)
     # i.e. is this node alive or (transiently) dead?
     field :nodes_alive, %{required(any()) => boolean()}
+
+    # Ongoing request timers for nodes this node has sent
+    # messages to, so that they can be cancelled
+    field :liveness_timers, %{required(any()) => reference()}
 
     # hash ring
     field :ring, ExHashRing.HashRing.t()
@@ -102,13 +106,14 @@ defmodule DynamoNode do
 
     nodes_alive =
       nodes
-      |> Enum.reject(fn node -> node == id end)
+      |> List.delete(id)
       |> Map.new(fn node -> {node, true} end)
 
     state = %DynamoNode{
       id: id,
       store: store,
       nodes_alive: nodes_alive,
+      liveness_timers: %{},
       ring: HashRing.new(nodes, 1),
       n: n,
       r: r,
@@ -158,13 +163,15 @@ defmodule DynamoNode do
 
         if not is_valid_coordinator(state, key) do
           # we are not the coordinator, so redirect to them
-          send(
-            Enum.at(get_preference_list(state, key), 0),
-            %RedirectedClientRequest{
-              client: client,
-              request: msg
-            }
-          )
+          state =
+            send_with_async_timeout(
+              state,
+              Enum.at(get_preference_list(state, key), 0),
+              %RedirectedClientRequest{
+                client: client,
+                request: msg
+              }
+            )
 
           listener(state)
         else
@@ -178,13 +185,15 @@ defmodule DynamoNode do
 
         if not is_valid_coordinator(state, key) do
           # we are not the coordinator, so redirect to them
-          send(
-            Enum.at(get_preference_list(state, key), 0),
-            %RedirectedClientRequest{
-              client: client,
-              request: msg
-            }
-          )
+          state =
+            send_with_async_timeout(
+              state,
+              Enum.at(get_preference_list(state, key), 0),
+              %RedirectedClientRequest{
+                client: client,
+                request: msg
+              }
+            )
 
           listener(state)
         else
@@ -200,6 +209,7 @@ defmodule DynamoNode do
          request: %ClientRequest.Get{} = orig_msg
        } = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
+        state = mark_alive(state, node)
 
         # we must be the coordinator for this key
         state = coord_handle_get_req(state, client, orig_msg)
@@ -211,6 +221,7 @@ defmodule DynamoNode do
          request: %ClientRequest.Put{} = orig_msg
        } = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
+        state = mark_alive(state, node)
 
         # we must be the coordinator for this key
         state = coord_handle_put_req(state, client, orig_msg)
@@ -219,14 +230,16 @@ defmodule DynamoNode do
       # coordinator requests
       {coordinator, %CoordinatorRequest.Get{nonce: nonce, key: key} = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(coordinator)}")
+        state = mark_alive(state, coordinator)
 
         {values, context} = Map.get(state.store, key)
 
-        send(coordinator, %CoordinatorResponse.Get{
-          nonce: nonce,
-          values: values,
-          context: context
-        })
+        state =
+          send_with_async_timeout(state, coordinator, %CoordinatorResponse.Get{
+            nonce: nonce,
+            values: values,
+            context: context
+          })
 
         listener(state)
 
@@ -238,20 +251,27 @@ defmodule DynamoNode do
          context: context
        } = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(coordinator)}")
+        state = mark_alive(state, coordinator)
 
         state = put(state, key, value, context)
-        send(coordinator, %CoordinatorResponse.Put{nonce: nonce})
+
+        state =
+          send_with_async_timeout(state, coordinator, %CoordinatorResponse.Put{
+            nonce: nonce
+          })
+
         listener(state)
 
       # node responses to coordinator requests
       {node, %CoordinatorResponse.Get{} = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
+        state = mark_alive(state, node)
         state = coord_handle_get_resp(state, node, msg)
         listener(state)
 
       {node, %CoordinatorResponse.Put{} = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
-
+        state = mark_alive(state, node)
         state = coord_handle_put_resp(state, node, msg)
         listener(state)
 
@@ -300,6 +320,15 @@ defmodule DynamoNode do
             | pending_puts: Map.delete(state.pending_puts, nonce)
           })
         end
+
+      {:request_timeout, node} ->
+        # mark this node dead
+        state = %{
+          state
+          | nodes_alive: Map.replace!(state.nodes_alive, node, false)
+        }
+
+        listener(state)
     end
   end
 
@@ -330,10 +359,17 @@ defmodule DynamoNode do
         nonce: nonce,
         key: key
       }) do
-    Enum.each(get_preference_list(state, key), fn node ->
-      # DO send get request to self
-      send(node, %CoordinatorRequest.Get{nonce: nonce, key: key})
-    end)
+    # since send_with_async_timeout modifies state,
+    # we need to reduce over the list of nodes while calling it
+    # to get the final state
+    state =
+      Enum.reduce(get_preference_list(state, key), state, fn node, state_acc ->
+        # DO send get request to self
+        send_with_async_timeout(state_acc, node, %CoordinatorRequest.Get{
+          nonce: nonce,
+          key: key
+        })
+      end)
 
     # start timer for the responses
     timer(state.client_timeout, {:client_timeout, :get, nonce})
@@ -444,17 +480,18 @@ defmodule DynamoNode do
     # write to own store
     state = put(state, key, value, context)
 
-    Enum.each(get_preference_list(state, key), fn node ->
+    state =
+      get_preference_list(state, key)
       # don't send put request to self
-      if node != state.id do
-        send(node, %CoordinatorRequest.Put{
+      |> List.delete(state.id)
+      |> Enum.reduce(state, fn node, state_acc ->
+        send_with_async_timeout(state_acc, node, %CoordinatorRequest.Put{
           nonce: nonce,
           key: key,
           value: value,
           context: context
         })
-      end
-    end)
+      end)
 
     if state.w <= 1 do
       # we've already written once, so this is enough
@@ -609,6 +646,7 @@ defmodule DynamoNode do
       store: state.store,
       nodes_alive:
         Map.new(state.nodes_alive, fn {node, _alive} -> {node, true} end),
+      liveness_timers: %{},
       ring: state.ring,
       n: state.n,
       r: state.r,
@@ -622,5 +660,63 @@ defmodule DynamoNode do
     crash_wait_loop()
 
     wiped_state
+  end
+
+  @doc """
+  Send msg to proc. Also start a timer to detect failure of proc.
+
+  This timer is set in state.liveness_timers, and should be
+  cancelled if a message is received from proc.
+
+  Doesn't reset timer if it already exists.
+  """
+  def send_with_async_timeout(state, node, msg) when state.id == node do
+    # since we deal with the weird situation where we might
+    # end up sending messages to ourself (see: `coord_handle_get_req`),
+    # checking that we're not keeping track of our own liveness status
+    # should help us keep some small measure of sanity
+    send(node, msg)
+  end
+
+  @spec send_with_async_timeout(%DynamoNode{}, any(), any()) :: %DynamoNode{}
+  def send_with_async_timeout(state, node, msg) do
+    send(node, msg)
+
+    %{
+      state
+      | liveness_timers:
+          Map.put_new_lazy(state.liveness_timers, node, fn ->
+            timer(state.request_timeout, {:request_timeout, node})
+          end)
+    }
+  end
+
+  @doc """
+  Mark a node alive.
+
+  We do this by setting its entry in state.nodes_alive to true
+  and by resetting and removing its liveness timer (if it has one).
+  """
+  def mark_alive(state, node) when state.id == node do
+    # since we deal with the weird situation where we might
+    # end up sending messages to ourself (see: `coord_handle_get_req`),
+    # checking that we're not keeping track of our own liveness status
+    # should help us keep some small measure of sanity
+    state
+  end
+
+  @spec mark_alive(%DynamoNode{}, any()) :: %DynamoNode{}
+  def mark_alive(state, node) do
+    {node_timer, new_liveness_timers} = Map.pop(state.liveness_timers, node)
+
+    if node.timer != nil do
+      cancel_timer(node_timer)
+    end
+
+    %{
+      state
+      | nodes_alive: Map.replace!(state.nodes_alive, node, true),
+        liveness_timers: new_liveness_timers
+    }
   end
 end
