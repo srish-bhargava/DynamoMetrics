@@ -321,8 +321,10 @@ defmodule DynamoNode do
           })
         end
 
-      {:request_timeout, node} ->
+      {:request_timeout, node} = msg ->
         # mark this node dead
+        Logger.info("Received #{inspect(msg)}")
+
         state = %{
           state
           | nodes_alive: Map.replace!(state.nodes_alive, node, false)
