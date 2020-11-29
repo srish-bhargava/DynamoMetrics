@@ -464,6 +464,15 @@ defmodule DynamoNodeTest do
     assert_receive %TestResponse{nonce: ^nonce, state: state}, 500
     assert state.nodes_alive == %{gonna_crash: false}
   end
+
+  test "Follower considers crashed coordinator dead after trying to redirect" do
+    data = Map.new(1..100, fn key -> {key, key * 42} end)
+    Cluster.start(data, [:a, :gonna_crash], 1, 1, 1, 1_000, 200)
+
+    send(:gonna_crash, :crash)
+
+    # generate bunch of traffic so that :gonna_crash becomes
+    # a coordinator at least once
     Enum.each(data, fn {key, _val} ->
       send(:a, %ClientRequest.Get{
         nonce: Nonce.new(),
@@ -474,18 +483,12 @@ defmodule DynamoNodeTest do
     # wait for the dust to settle
     receive do
     after
-      2_000 -> true
+      1_200 -> true
     end
 
-    expected_nodes_alive =
-      Map.new(nodes, fn node -> {node, true} end)
-      |> Map.put(:gonna_crash, false)
-
-    for node <- nodes do
-      nonce = Nonce.new()
-      send(node, %TestRequest{nonce: nonce})
-      assert_receive %TestResponse{nonce: ^nonce, state: state}, 500
-      assert state.nodes_alive == Map.delete(expected_nodes_alive, node)
-    end
+    nonce = Nonce.new()
+    send(:a, %TestRequest{nonce: nonce})
+    assert_receive %TestResponse{nonce: ^nonce, state: state}, 500
+    assert state.nodes_alive == %{gonna_crash: false}
   end
 end
