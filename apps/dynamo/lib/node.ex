@@ -234,12 +234,11 @@ defmodule DynamoNode do
 
         {values, context} = Map.get(state.store, key)
 
-        state =
-          send_with_async_timeout(state, coordinator, %CoordinatorResponse.Get{
-            nonce: nonce,
-            values: values,
-            context: context
-          })
+        send(coordinator, %CoordinatorResponse.Get{
+          nonce: nonce,
+          values: values,
+          context: context
+        })
 
         listener(state)
 
