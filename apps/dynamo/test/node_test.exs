@@ -427,4 +427,52 @@ defmodule DynamoNodeTest do
 
     assert_receive _msg, 1_000
   end
+
+  test "Node considers all nodes healthy on startup" do
+    nodes = [:a, :b, :c]
+    Cluster.start(%{}, nodes, 3, 1, 1, 1_000, 200)
+
+    expected_nodes_alive = Map.new(nodes, fn node -> {node, true} end)
+
+    for node <- nodes do
+      nonce = Nonce.new()
+      send(node, %TestRequest{nonce: nonce})
+      assert_receive %TestResponse{nonce: ^nonce, state: state}, 500
+      assert state.nodes_alive == Map.delete(expected_nodes_alive, node)
+    end
+  end
+
+  test "All nodes consider crashed node dead after lots of traffic" do
+    nodes = [:a, :b, :c]
+    data = Map.new(1..1000, fn key -> {key, key * 42} end)
+
+    Cluster.start(data, [:gonna_crash | nodes], 3, 3, 3, 1_000, 200)
+
+    send(:gonna_crash, :crash)
+
+    # generate lots of traffic
+    Enum.each(data, fn {key, _val} ->
+      send(:a, %ClientRequest.Get{
+        nonce: Nonce.new(),
+        key: key
+      })
+    end)
+
+    # wait for the dust to settle
+    receive do
+    after
+      2_000 -> true
+    end
+
+    expected_nodes_alive =
+      Map.new(nodes, fn node -> {node, true} end)
+      |> Map.put(:gonna_crash, false)
+
+    for node <- nodes do
+      nonce = Nonce.new()
+      send(node, %TestRequest{nonce: nonce})
+      assert_receive %TestResponse{nonce: ^nonce, state: state}, 500
+      assert state.nodes_alive == Map.delete(expected_nodes_alive, node)
+    end
+  end
 end
