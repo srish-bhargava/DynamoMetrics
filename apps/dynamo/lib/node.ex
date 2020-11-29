@@ -686,6 +686,7 @@ defmodule DynamoNode do
     # checking that we're not keeping track of our own liveness status
     # should help us keep some small measure of sanity
     send(node, msg)
+    state
   end
 
   @spec send_with_async_timeout(%DynamoNode{}, any(), any()) :: %DynamoNode{}
@@ -719,7 +720,7 @@ defmodule DynamoNode do
   def mark_alive(state, node) do
     {node_timer, new_liveness_timers} = Map.pop(state.liveness_timers, node)
 
-    if node.timer != nil do
+    if node_timer != nil do
       cancel_timer(node_timer)
     end
 
