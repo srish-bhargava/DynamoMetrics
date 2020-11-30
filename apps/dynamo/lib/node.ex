@@ -144,7 +144,7 @@ defmodule DynamoNode do
   def get_first_alive_coordinator(state, key) do
     pref_list = get_preference_list(state, key)
     Enum.find(pref_list, nil, fn node ->
-      state.nodes_alive[node] == true
+      node == state.id or state.nodes_alive[node] == true
     end)
   end
 
