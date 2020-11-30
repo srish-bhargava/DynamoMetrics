@@ -154,7 +154,7 @@ defmodule DynamoNode do
   """
   @spec get_alive_preference_list(%DynamoNode{}, any()) :: [any()]
   def get_alive_preference_list(state, key) do
-    all_nodes_ordered = HashRing.find_nodes(state.ring, key, map_size(state.nodes_alive))
+    all_nodes_ordered = HashRing.find_nodes(state.ring, key, map_size(state.nodes_alive) + 1)
     only_healthy = Enum.filter(all_nodes_ordered, fn node ->
       node == state.id or state.nodes_alive[node] == true
     end)
