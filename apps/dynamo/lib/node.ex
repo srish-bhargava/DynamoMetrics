@@ -331,6 +331,11 @@ defmodule DynamoNode do
 
         listener(state)
 
+      {node, :recovered} = msg ->
+        Logger.info("Received #{inspect msg}")
+        state = mark_alive(state, node)
+        listener(state)
+
       # testing
       {from, %TestRequest{nonce: nonce}} ->
         # respond with our current state
@@ -669,6 +674,11 @@ defmodule DynamoNode do
     }
 
     crash_wait_loop()
+
+    # inform others you have recovered
+    Enum.each(Map.keys(state.nodes_alive), fn node ->
+      send(node, :recovered)
+    end)
 
     wiped_state
   end
