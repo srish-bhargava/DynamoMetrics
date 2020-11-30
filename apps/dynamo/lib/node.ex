@@ -137,6 +137,18 @@ defmodule DynamoNode do
   end
 
   @doc """
+  Return the first valid coordinator that you think is alive,
+  nil if no valid coordinator is alive.
+  """
+  @spec get_first_alive_coordinator(%DynamoNode{}, any()) :: any() | nil
+  def get_first_alive_coordinator(state, key) do
+    pref_list = get_preference_list(state, key)
+    Enum.find(pref_list, nil, fn node ->
+      state.nodes_alive[node] == true
+    end)
+  end
+
+  @doc """
   Check if this node is a valid coordinator for a particular key
   (i.e. in the top `n` for this key).
   """
@@ -158,48 +170,72 @@ defmodule DynamoNode do
         listener(state)
 
       # client requests
-      {client, %ClientRequest.Get{key: key} = msg} ->
+      {client, %ClientRequest.Get{key: key, nonce: nonce} = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(client)}")
 
-        if not is_valid_coordinator(state, key) do
-          # we are not the coordinator, so redirect to them
-          state =
-            send_with_async_timeout(
-              state,
-              Enum.at(get_preference_list(state, key), 0),
-              %RedirectedClientRequest{
-                client: client,
-                request: msg
-              }
-            )
+        coord = get_first_alive_coordinator(state, key)
+        cond do
+          is_valid_coordinator(state, key) ->
+            # handle the request properly
+            state = coord_handle_get_req(state, client, msg)
+            listener(state)
 
-          listener(state)
-        else
-          # we are the coordinator, so process the request
-          state = coord_handle_get_req(state, client, msg)
-          listener(state)
+          coord != nil ->
+            # redirect to coordinator
+            state =
+              send_with_async_timeout(
+                state,
+                coord,
+                %RedirectedClientRequest{
+                  client: client,
+                  request: msg
+                }
+              )
+            listener(state)
+
+          coord == nil ->
+            # no valid coordinator, reply false
+            send(client, %ClientResponse.Get{
+              nonce: nonce,
+              success: false,
+              values: nil,
+              context: nil
+            })
+            listener(state)
         end
 
-      {client, %ClientRequest.Put{key: key} = msg} ->
+      {client, %ClientRequest.Put{key: key, nonce: nonce} = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(client)}")
 
-        if not is_valid_coordinator(state, key) do
-          # we are not the coordinator, so redirect to them
-          state =
-            send_with_async_timeout(
-              state,
-              Enum.at(get_preference_list(state, key), 0),
-              %RedirectedClientRequest{
-                client: client,
-                request: msg
-              }
-            )
+        coord = get_first_alive_coordinator(state, key)
+        cond do
+          is_valid_coordinator(state, key) ->
+            # handle the request properly
+            state = coord_handle_put_req(state, client, msg)
+            listener(state)
 
-          listener(state)
-        else
-          # we are the coordinator, so process the request
-          state = coord_handle_put_req(state, client, msg)
-          listener(state)
+          coord != nil ->
+            # redirect to coordinator
+            state =
+              send_with_async_timeout(
+                state,
+                coord,
+                %RedirectedClientRequest{
+                  client: client,
+                  request: msg
+                }
+              )
+
+            listener(state)
+
+          coord == nil ->
+            # no valid coordinator, reply false
+            send(client, %ClientResponse.Put{
+              nonce: nonce,
+              success: false,
+              context: nil
+            })
+            listener(state)
         end
 
       # redirects from other nodes
