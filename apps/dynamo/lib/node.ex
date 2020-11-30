@@ -149,6 +149,19 @@ defmodule DynamoNode do
   end
 
   @doc """
+  Return a list of the top `n` healthy nodes for a particular key.
+  Return fewer if there are fewer than `n` nodes alive in total.
+  """
+  @spec get_alive_preference_list(%DynamoNode{}, any()) :: [any()]
+  def get_alive_preference_list(state, key) do
+    all_nodes_ordered = HashRing.find_nodes(state.ring, key, map_size(state.nodes_alive))
+    only_healthy = Enum.filter(all_nodes_ordered, fn node ->
+      node == state.id or state.nodes_alive[node] == true
+    end)
+    Enum.take(only_healthy, state.n)
+  end
+
+  @doc """
   Check if this node is a valid coordinator for a particular key
   (i.e. in the top `n` for this key).
   """
@@ -415,7 +428,7 @@ defmodule DynamoNode do
     # we need to reduce over the list of nodes while calling it
     # to get the final state
     state =
-      Enum.reduce(get_preference_list(state, key), state, fn node, state_acc ->
+      Enum.reduce(get_alive_preference_list(state, key), state, fn node, state_acc ->
         # DO send get request to self
         send_with_async_timeout(state_acc, node, %CoordinatorRequest.Get{
           nonce: nonce,
@@ -533,7 +546,7 @@ defmodule DynamoNode do
     state = put(state, key, value, context)
 
     state =
-      get_preference_list(state, key)
+      get_alive_preference_list(state, key)
       # don't send put request to self
       |> List.delete(state.id)
       |> Enum.reduce(state, fn node, state_acc ->
