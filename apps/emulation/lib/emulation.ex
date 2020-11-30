@@ -119,7 +119,7 @@ defmodule Emulation do
   Set a timer for `ms` milliseconds, and send a message to
   the calling process  with `atom` when done.
   """
-  @spec timer(non_neg_integer(), atom()) :: reference()
+  @spec timer(non_neg_integer(), any()) :: reference()
   def timer(ms, atom) do
     ComBase.timer(get_context(), ms, atom)
   end
@@ -191,7 +191,7 @@ defmodule Emulation do
   Cancel a timer previously set using either `timer/1` or
   `timer/2`. `timer` is the reference returned by those
   calls. Returns the number of milliseconds left on the
-  timer or `false` if the timer had already expired. 
+  timer or `false` if the timer had already expired.
   """
   @spec cancel_timer(reference()) :: number() | false
   def cancel_timer(timer) do
