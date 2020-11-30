@@ -98,11 +98,19 @@ defmodule DynamoNode do
     Logger.info("Starting node #{inspect(id)}")
     Logger.metadata(id: id)
 
+    ring = HashRing.new(nodes, 1)
+
     # convert data from a key-value map to a versioned store
+    # only store data that you're concerned with
+    # (i.e. you're in preference list for)
     store =
-      Map.new(data, fn {k, v} ->
-        {k, {[v], %Context{version: VectorClock.new()}}}
-      end)
+       data
+        |> Enum.filter(fn {k, _v} ->
+            id in HashRing.find_nodes(ring, k, n)
+           end)
+        |> Map.new(fn {k, v} ->
+            {k, {[v], %Context{version: VectorClock.new()}}}
+           end)
 
     nodes_alive =
       nodes
@@ -114,7 +122,7 @@ defmodule DynamoNode do
       store: store,
       nodes_alive: nodes_alive,
       liveness_timers: %{},
-      ring: HashRing.new(nodes, 1),
+      ring: ring,
       n: n,
       r: r,
       w: w,
