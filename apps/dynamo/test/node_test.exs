@@ -465,6 +465,36 @@ defmodule DynamoNodeTest do
     assert state.nodes_alive == %{gonna_crash: false}
   end
 
+  test "Coordinator considers recovered crashed node alive" do
+    Cluster.start(%{foo: 42}, [:a, :gonna_crash], 2, 2, 2, 1_000, 200)
+
+    send(:gonna_crash, :crash)
+
+    # generate lots of traffic
+    send(:a, %ClientRequest.Get{
+      nonce: Nonce.new(),
+      key: :foo
+    })
+
+    # wait for the dust to settle
+    receive do
+    after
+      1_200 -> true
+    end
+
+    send(:gonna_crash, :recover)
+
+    receive do
+    after
+      500 -> true
+    end
+
+    nonce = Nonce.new()
+    send(:a, %TestRequest{nonce: nonce})
+    assert_receive %TestResponse{nonce: ^nonce, state: state}, 500
+    assert state.nodes_alive == %{gonna_crash: true}
+  end
+
   test "Follower considers crashed coordinator dead after trying to redirect" do
     data = Map.new(1..100, fn key -> {key, key * 42} end)
     Cluster.start(data, [:a, :gonna_crash], 1, 1, 1, 1_000, 200)
@@ -490,5 +520,39 @@ defmodule DynamoNodeTest do
     send(:a, %TestRequest{nonce: nonce})
     assert_receive %TestResponse{nonce: ^nonce, state: state}, 500
     assert state.nodes_alive == %{gonna_crash: false}
+  end
+
+  test "Follower considers recovered crashed coordinator alive" do
+    data = Map.new(1..100, fn key -> {key, key * 42} end)
+    Cluster.start(data, [:a, :gonna_crash], 1, 1, 1, 1_000, 200)
+
+    send(:gonna_crash, :crash)
+
+    # generate bunch of traffic so that :gonna_crash becomes
+    # a coordinator at least once
+    Enum.each(data, fn {key, _val} ->
+      send(:a, %ClientRequest.Get{
+        nonce: Nonce.new(),
+        key: key
+      })
+    end)
+
+    # wait for the dust to settle
+    receive do
+    after
+      1_200 -> true
+    end
+
+    send(:gonna_crash, :recover)
+
+    receive do
+    after
+      500 -> true
+    end
+
+    nonce = Nonce.new()
+    send(:a, %TestRequest{nonce: nonce})
+    assert_receive %TestResponse{nonce: ^nonce, state: state}, 500
+    assert state.nodes_alive == %{gonna_crash: true}
   end
 end
