@@ -7,6 +7,8 @@ defmodule DynamoNodeTest do
   import Kernel,
     except: [spawn: 3, spawn: 1, spawn_link: 1, spawn_link: 3, send: 2]
 
+  alias ExHashRing.HashRing
+
   setup do
     Emulation.init()
     # NOTE Ideally, we'd run `Emulation.terminate()` after the test has ended
@@ -535,5 +537,106 @@ defmodule DynamoNodeTest do
     send(:a, %TestRequest{nonce: nonce})
     assert_receive %TestResponse{nonce: ^nonce, state: state}, 500
     assert state.nodes_alive == %{gonna_crash: true}
+  end
+
+  test "alive pref list is same as pref list if all alive" do
+    nodes = Enum.to_list(1..50)
+    ring = HashRing.new(nodes, 1)
+    nodes_alive = Map.new(nodes, fn node -> {node, true} end)
+
+    # mock up the useful bits of state
+    for node <- nodes, key <- 1..200 do
+      state = %DynamoNode{
+        id: node,
+        ring: ring,
+        n: 20,
+        nodes_alive: Map.delete(nodes_alive, node),
+        # -- unused --
+        store: nil,
+        liveness_timers: nil,
+        r: nil,
+        w: nil,
+        client_timeout: nil,
+        request_timeout: nil,
+        pending_gets: nil,
+        pending_puts: nil
+      }
+
+      assert DynamoNode.get_preference_list(state, key) ==
+               DynamoNode.get_alive_preference_list(state, key)
+    end
+  end
+
+  test "alive pref list doesn't contain dead nodes" do
+    nodes = Enum.to_list(1..20)
+    ring = HashRing.new(nodes, 1)
+
+    nodes_alive =
+      Map.new(nodes, fn node -> {node, Enum.random([true, false])} end)
+
+    for {node, true} <- nodes_alive, key <- 1..100 do
+      # mock up the useful bits of state
+      state = %DynamoNode{
+        id: node,
+        ring: ring,
+        n: 8,
+        nodes_alive: Map.delete(nodes_alive, node),
+        # -- unused --
+        store: nil,
+        liveness_timers: nil,
+        r: nil,
+        w: nil,
+        client_timeout: nil,
+        request_timeout: nil,
+        pending_gets: nil,
+        pending_puts: nil
+      }
+
+      DynamoNode.get_alive_preference_list(state, key)
+      |> Enum.each(fn node ->
+        assert nodes_alive[node] == true
+      end)
+    end
+  end
+
+  test "alive pref list maintains order" do
+    nodes = Enum.to_list(1..20)
+    num_nodes = length(nodes)
+    ring = HashRing.new(nodes, 1)
+
+    nodes_alive =
+      Map.new(nodes, fn node -> {node, Enum.random([true, false])} end)
+
+    for {node, true} <- nodes_alive, key <- 1..100 do
+      # mock up the useful bits of state
+      state = %DynamoNode{
+        id: node,
+        ring: ring,
+        n: 8,
+        nodes_alive: Map.delete(nodes_alive, node),
+        # -- unused --
+        store: nil,
+        liveness_timers: nil,
+        r: nil,
+        w: nil,
+        client_timeout: nil,
+        request_timeout: nil,
+        pending_gets: nil,
+        pending_puts: nil
+      }
+
+      alive_pref_list = DynamoNode.get_alive_preference_list(state, key)
+
+      whole_pref_list =
+        DynamoNode.get_preference_list(%{state | n: num_nodes}, key)
+
+      alive_pref_order =
+        Enum.map(alive_pref_list, fn node ->
+          Enum.find_index(whole_pref_list, &(&1 == node))
+        end)
+
+      assert nil not in alive_pref_order
+      assert alive_pref_order == Enum.sort(alive_pref_order)
+    end
   end
 end
