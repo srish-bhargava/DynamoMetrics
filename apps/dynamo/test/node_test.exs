@@ -115,13 +115,10 @@ defmodule DynamoNodeTest do
   end
 
   test "First get request returns the initial value" do
+    Cluster.start(%{foo: 42}, [:a, :b, :c], 3, 2, 2, 1_000, 9999)
+
     nonce = Nonce.new()
-
-    spawn(:node, fn ->
-      DynamoNode.start(:node, %{foo: 42}, [:node], 1, 1, 1, 1_000, 9999)
-    end)
-
-    send(:node, %ClientRequest.Get{nonce: nonce, key: :foo})
+    send(:a, %ClientRequest.Get{nonce: nonce, key: :foo})
 
     assert_receive %ClientResponse.Get{
                      nonce: ^nonce,
@@ -133,13 +130,11 @@ defmodule DynamoNodeTest do
   end
 
   test "Simple put request is successful" do
+    Cluster.start(%{}, [:a, :b, :c], 1, 1, 1, 1_000, 9999)
+
     nonce = Nonce.new()
 
-    spawn(:node, fn ->
-      DynamoNode.start(:node, %{}, [:node], 1, 1, 1, 1_000, 9999)
-    end)
-
-    send(:node, %ClientRequest.Put{
+    send(:a, %ClientRequest.Put{
       nonce: nonce,
       key: :foo,
       value: 42,
@@ -151,21 +146,19 @@ defmodule DynamoNodeTest do
   end
 
   test "get after a put returns the put value with empty initial data" do
+    Cluster.start(%{}, [:a, :b, :c], 1, 1, 1, 1_000, 9999)
+
     nonce_put = Nonce.new()
     nonce_get = Nonce.new()
 
-    spawn(:node, fn ->
-      DynamoNode.start(:node, %{}, [:node], 1, 1, 1, 1_000, 9999)
-    end)
-
-    send(:node, %ClientRequest.Put{
+    send(:a, %ClientRequest.Put{
       nonce: nonce_put,
       key: :foo,
       value: 42,
       context: %Context{version: VectorClock.new()}
     })
 
-    send(:node, %ClientRequest.Get{nonce: nonce_get, key: :foo})
+    send(:a, %ClientRequest.Get{nonce: nonce_get, key: :foo})
 
     assert_receive %ClientResponse.Get{
                      nonce: ^nonce_get,
@@ -177,21 +170,19 @@ defmodule DynamoNodeTest do
   end
 
   test "put request overwrites key in initial data" do
+    Cluster.start(%{foo: 37}, [:a, :b, :c], 1, 1, 1, 1_000, 9999)
+
     nonce_put = Nonce.new()
     nonce_get = Nonce.new()
 
-    spawn(:node, fn ->
-      DynamoNode.start(:node, %{foo: 37}, [:node], 1, 1, 1, 1_000, 9999)
-    end)
-
-    send(:node, %ClientRequest.Put{
+    send(:a, %ClientRequest.Put{
       nonce: nonce_put,
       key: :foo,
       value: 42,
       context: %Context{version: VectorClock.new()}
     })
 
-    send(:node, %ClientRequest.Get{nonce: nonce_get, key: :foo})
+    send(:a, %ClientRequest.Get{nonce: nonce_get, key: :foo})
 
     assert_receive %ClientResponse.Get{
                      nonce: ^nonce_get,
@@ -207,11 +198,7 @@ defmodule DynamoNodeTest do
 
     nodes = [:a, :b, :c, :d, :e, :f]
 
-    Enum.each(nodes, fn node ->
-      spawn(node, fn ->
-        DynamoNode.start(node, data, nodes, 4, 3, 2, 1_000, 9999)
-      end)
-    end)
+    Cluster.start(data, nodes, 4, 3, 2, 1_000, 9999)
 
     for {key, value} <- data do
       nonce = Nonce.new()
@@ -233,11 +220,7 @@ defmodule DynamoNodeTest do
 
     nodes = [:a, :b, :c, :d, :e, :f]
 
-    Enum.each(nodes, fn node ->
-      spawn(node, fn ->
-        DynamoNode.start(node, data, nodes, 4, 3, 2, 1_000, 9999)
-      end)
-    end)
+    Cluster.start(data, nodes, 4, 3, 2, 1_000, 9999)
 
     for {key, _value} <- data do
       nonce = Nonce.new()
@@ -407,9 +390,7 @@ defmodule DynamoNodeTest do
 
     send(:a, :recover)
 
-    refute_receive msg,
-                   1_000,
-                   "Received response (#{inspect(msg)}) for some request"
+    refute_receive _msg, 1_000
   end
 
   test "Crashed node responds to messages after recovery" do
@@ -447,7 +428,7 @@ defmodule DynamoNodeTest do
 
     send(:gonna_crash, :crash)
 
-    # generate lots of traffic
+    # generate some traffic
     send(:a, %ClientRequest.Get{
       nonce: Nonce.new(),
       key: :foo
@@ -470,7 +451,7 @@ defmodule DynamoNodeTest do
 
     send(:gonna_crash, :crash)
 
-    # generate lots of traffic
+    # generate some traffic
     send(:a, %ClientRequest.Get{
       nonce: Nonce.new(),
       key: :foo
