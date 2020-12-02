@@ -234,6 +234,23 @@ defmodule DynamoNode do
     Enum.member?(get_preference_list(state, key), state.id)
   end
 
+  def client_get_fail_msg(nonce) do
+    %ClientResponse.Get{
+      nonce: nonce,
+      success: false,
+      values: nil,
+      context: nil
+    }
+  end
+
+  def client_put_fail_msg(nonce) do
+    %ClientResponse.Put{
+      nonce: nonce,
+      success: false,
+      context: nil
+    }
+  end
+
   @doc """
   Handle, redirect, or reply failure to an incoming client request.
   """
@@ -241,9 +258,22 @@ defmodule DynamoNode do
         state,
         received_msg,
         client,
-        coord_handler,
-        fail_msg
+        get_or_put
       ) do
+    coord_handler =
+      if get_or_put == :get do
+        &coord_handle_get_req/3
+      else
+        &coord_handle_put_req/3
+      end
+
+    fail_msg =
+      if get_or_put == :get do
+        client_get_fail_msg(received_msg.nonce)
+      else
+        client_put_fail_msg(received_msg.nonce)
+      end
+
     coord = get_first_alive_coordinator(state, received_msg.key)
 
     cond do
