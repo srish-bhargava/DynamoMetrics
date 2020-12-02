@@ -323,13 +323,21 @@ defmodule DynamoNode do
         Logger.info("Received #{inspect(msg)} from #{inspect(coordinator)}")
         state = mark_alive(state, coordinator)
 
-        {values, context} = Map.get(state.store, key)
+        stored = Map.get(state.store, key)
 
-        send(coordinator, %CoordinatorResponse.Get{
-          nonce: nonce,
-          values: values,
-          context: context
-        })
+        case stored do
+          {values, context} ->
+            send(coordinator, %CoordinatorResponse.Get{
+              nonce: nonce,
+              values: values,
+              # remove the hint, so it doesn't get stored somewhere
+              # else as well
+              context: %{context | hint: nil}
+            })
+
+          nil ->
+            Logger.debug("Don't have key #{inspect(key)}, so not responding")
+        end
 
         listener(state)
 
