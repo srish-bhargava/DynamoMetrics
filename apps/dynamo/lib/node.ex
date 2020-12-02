@@ -208,6 +208,37 @@ defmodule DynamoNode do
   end
 
   @doc """
+  Handle, redirect, or reply failure to an incoming client request.
+  """
+  def handle_client_request(
+        state,
+        received_msg,
+        client,
+        coord_handler,
+        fail_msg
+      ) do
+    coord = get_first_alive_coordinator(state, received_msg.key)
+
+    cond do
+      is_valid_coordinator(state, received_msg.key) ->
+        # handle the request as coordinator
+        coord_handler.(state, client, received_msg)
+
+      coord != nil ->
+        # redirect to coordinator
+        send_with_async_timeout(state, coord, %RedirectedClientRequest{
+          client: client,
+          request: received_msg
+        })
+
+      coord == nil ->
+        # no valid coordinator, reply failure
+        send(client, fail_msg)
+        state
+    end
+  end
+
+  @doc """
   Listen and serve requests, forever.
   """
   @spec listener(%DynamoNode{}) :: no_return()
@@ -220,78 +251,42 @@ defmodule DynamoNode do
         listener(state)
 
       # client requests
-      {client, %ClientRequest.Get{key: key, nonce: nonce} = msg} ->
+      {client, %ClientRequest.Get{nonce: nonce} = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(client)}")
 
-        coord = get_first_alive_coordinator(state, key)
-
-        cond do
-          is_valid_coordinator(state, key) ->
-            # handle the request properly
-            state = coord_handle_get_req(state, client, msg)
-            listener(state)
-
-          coord != nil ->
-            # redirect to coordinator
-            state =
-              send_with_async_timeout(
-                state,
-                coord,
-                %RedirectedClientRequest{
-                  client: client,
-                  request: msg
-                }
-              )
-
-            listener(state)
-
-          coord == nil ->
-            # no valid coordinator, reply false
-            send(client, %ClientResponse.Get{
+        state =
+          handle_client_request(
+            state,
+            msg,
+            client,
+            &coord_handle_get_req/3,
+            %ClientResponse.Get{
               nonce: nonce,
               success: false,
               values: nil,
               context: nil
-            })
+            }
+          )
 
-            listener(state)
-        end
+        listener(state)
 
-      {client, %ClientRequest.Put{key: key, nonce: nonce} = msg} ->
+      {client, %ClientRequest.Put{nonce: nonce} = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(client)}")
 
-        coord = get_first_alive_coordinator(state, key)
-
-        cond do
-          is_valid_coordinator(state, key) ->
-            # handle the request properly
-            state = coord_handle_put_req(state, client, msg)
-            listener(state)
-
-          coord != nil ->
-            # redirect to coordinator
-            state =
-              send_with_async_timeout(
-                state,
-                coord,
-                %RedirectedClientRequest{
-                  client: client,
-                  request: msg
-                }
-              )
-
-            listener(state)
-
-          coord == nil ->
-            # no valid coordinator, reply false
-            send(client, %ClientResponse.Put{
+        state =
+          handle_client_request(
+            state,
+            msg,
+            client,
+            &coord_handle_put_req/3,
+            %ClientResponse.Put{
               nonce: nonce,
               success: false,
               context: nil
-            })
+            }
+          )
 
-            listener(state)
-        end
+        listener(state)
 
       # redirects from other nodes
       {node,
