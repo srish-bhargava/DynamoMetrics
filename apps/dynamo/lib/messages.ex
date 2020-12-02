@@ -162,7 +162,7 @@ defmodule HandoffRequest do
     """
     field :nonce, Nonce.t()
     field :key, any()
-    field :value, any()
+    field :values, any()
     field :context, %Context{}
   end
 end

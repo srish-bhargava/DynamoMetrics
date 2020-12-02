@@ -350,8 +350,7 @@ defmodule DynamoNode do
        } = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(coordinator)}")
         state = mark_alive(state, coordinator)
-
-        state = put(state, key, value, context)
+        state = put(state, key, [value], context)
 
         state =
           send_with_async_timeout(state, coordinator, %CoordinatorResponse.Put{
@@ -371,6 +370,18 @@ defmodule DynamoNode do
         Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
         state = mark_alive(state, node)
         state = coord_handle_put_resp(state, node, msg)
+        listener(state)
+
+      # handoffs
+      {node,
+       %HandoffRequest{
+         key: key,
+         values: values,
+         context: context
+       } = msg} ->
+        Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
+        state = mark_alive(state, node)
+        state = put(state, key, values, context)
         listener(state)
 
       # timeouts
@@ -595,7 +606,7 @@ defmodule DynamoNode do
     context = %{context | version: VectorClock.tick(context.version, state.id)}
 
     # write to own store
-    state = put(state, key, value, context)
+    state = put(state, key, [value], context)
 
     state =
       get_alive_preference_list_with_intended(state, key)
@@ -700,11 +711,11 @@ defmodule DynamoNode do
   Add `key`-`value` association to local storage,
   squashing any outdated versions.
   """
-  @spec put(%DynamoNode{}, any(), any(), %Context{}) :: %DynamoNode{}
-  def put(state, key, value, context) do
-    Logger.debug("Writing #{inspect(value)} to key #{inspect(key)}")
+  @spec put(%DynamoNode{}, any(), [any()], %Context{}) :: %DynamoNode{}
+  def put(state, key, values, context) do
+    Logger.debug("Writing #{inspect(values)} to key #{inspect(key)}")
 
-    new_value = {[value], context}
+    new_value = {values, context}
 
     new_store =
       Map.update(state.store, key, new_value, fn orig_value ->
