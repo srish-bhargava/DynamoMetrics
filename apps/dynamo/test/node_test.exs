@@ -37,7 +37,7 @@ defmodule DynamoNodeTest do
   end
 
   defp new_context() do
-    new_context
+    %Context{version: VectorClock.new()}
   end
 
   describe "No crashes" do
@@ -185,7 +185,7 @@ defmodule DynamoNodeTest do
       nonce: nonce,
       key: :foo,
       value: 42,
-      context: new_context
+      context: new_context()
     })
 
     assert_receive %ClientResponse.Put{nonce: ^nonce, success: true},
@@ -202,7 +202,7 @@ defmodule DynamoNodeTest do
       nonce: nonce_put,
       key: :foo,
       value: 42,
-      context: new_context
+      context: new_context()
     })
 
     send(:a, %ClientRequest.Get{nonce: nonce_get, key: :foo})
@@ -226,7 +226,7 @@ defmodule DynamoNodeTest do
       nonce: nonce_put,
       key: :foo,
       value: 42,
-      context: new_context
+      context: new_context()
     })
 
     send(:a, %ClientRequest.Get{nonce: nonce_get, key: :foo})
@@ -276,7 +276,7 @@ defmodule DynamoNodeTest do
         nonce: nonce,
         key: key,
         value: 100,
-        context: new_context
+        context: new_context()
       })
     end
 
@@ -352,7 +352,7 @@ defmodule DynamoNodeTest do
       nonce: nonce,
       key: :foo,
       value: 49,
-      context: new_context
+      context: new_context()
     })
 
     assert_receive %ClientResponse.Put{
