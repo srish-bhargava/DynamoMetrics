@@ -738,7 +738,7 @@ defmodule DynamoNode do
         Logger.info("Received #{inspect(msg)}")
 
       other_msg ->
-        Logger.info("Dead, ignoring #{inspect(other_msg)}")
+        Logger.debug("Dead, ignoring #{inspect(other_msg)}")
         crash_wait_loop()
     end
   end
