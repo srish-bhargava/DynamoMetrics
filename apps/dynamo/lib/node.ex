@@ -826,6 +826,7 @@ defmodule DynamoNode do
 
     crash_wait_loop()
 
+    timer(state.alive_check_interval, :alive_check_interval)
     wiped_state
   end
 
