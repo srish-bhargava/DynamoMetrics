@@ -45,7 +45,11 @@ defmodule DynamoNode do
 
     # Number of milliseconds for which a coordinator
     # should wait before failing a client request
-    field :client_timeout, pos_integer()
+    field :coordinator_timeout, pos_integer()
+
+    # Number of milliseconds for which a node should try
+    # to redirect to a client request before failing it
+    field :redirect_timeout, pos_integer()
 
     # Number of milliseconds a node should wait for
     # a response from another node
@@ -91,10 +95,21 @@ defmodule DynamoNode do
           pos_integer(),
           pos_integer(),
           pos_integer(),
+          pos_integer(),
           pos_integer()
         ) ::
           no_return()
-  def start(id, data, nodes, n, r, w, client_timeout, request_timeout) do
+  def start(
+        id,
+        data,
+        nodes,
+        n,
+        r,
+        w,
+        coordinator_timeout,
+        redirect_timeout,
+        request_timeout
+      ) do
     Logger.info("Starting node #{inspect(id)}")
     Logger.metadata(id: id)
 
@@ -126,7 +141,8 @@ defmodule DynamoNode do
       n: n,
       r: r,
       w: w,
-      client_timeout: client_timeout,
+      coordinator_timeout: coordinator_timeout,
+      redirect_timeout: redirect_timeout,
       request_timeout: request_timeout,
       pending_gets: %{},
       pending_puts: %{}
@@ -380,7 +396,7 @@ defmodule DynamoNode do
         listener(state)
 
       # timeouts
-      {:client_timeout, :get, nonce} = msg ->
+      {:coordinator_timeout, :get, nonce} = msg ->
         Logger.info("Received #{inspect(msg)}")
         req_state = Map.get(state.pending_gets, nonce)
 
@@ -403,7 +419,7 @@ defmodule DynamoNode do
           })
         end
 
-      {:client_timeout, :put, nonce} = msg ->
+      {:coordinator_timeout, :put, nonce} = msg ->
         Logger.info("Received #{inspect(msg)}")
         req_state = Map.get(state.pending_puts, nonce)
 
@@ -495,7 +511,7 @@ defmodule DynamoNode do
       end)
 
     # start timer for the responses
-    timer(state.client_timeout, {:client_timeout, :get, nonce})
+    timer(state.coordinator_timeout, {:coordinator_timeout, :get, nonce})
 
     %{
       state
@@ -628,7 +644,7 @@ defmodule DynamoNode do
       state
     else
       # otherwise, start timer for the responses and mark pending
-      timer(state.client_timeout, {:client_timeout, :put, nonce})
+      timer(state.coordinator_timeout, {:coordinator_timeout, :put, nonce})
 
       %{
         state
@@ -771,7 +787,8 @@ defmodule DynamoNode do
       n: state.n,
       r: state.r,
       w: state.w,
-      client_timeout: state.client_timeout,
+      coordinator_timeout: state.coordinator_timeout,
+      redirect_timeout: state.redirect_timeout,
       request_timeout: state.request_timeout,
       pending_gets: %{},
       pending_puts: %{}
