@@ -175,6 +175,31 @@ defmodule DynamoNode do
   end
 
   @doc """
+  Return a list of the top `n` healthy nodes for a particular key,
+  along with the originally intended recipient (who's dead) and nil
+  if it is the intended recipient.
+  """
+  @spec get_alive_preference_list_with_intended(%DynamoNode{}, any()) :: [
+          {any(), any() | nil}
+        ]
+  def get_alive_preference_list_with_intended(state, key) do
+    orig_pref_list = get_preference_list(state, key)
+    alive_pref_list = get_alive_preference_list(state, key)
+
+    Enum.zip(alive_pref_list, orig_pref_list)
+    |> Enum.map(fn {actual, orig} ->
+      intended =
+        if actual == orig do
+          nil
+        else
+          orig
+        end
+
+      {actual, intended}
+    end)
+  end
+
+  @doc """
   Check if this node is a valid coordinator for a particular key
   (i.e. in the top `n` for this key).
   """
@@ -565,15 +590,15 @@ defmodule DynamoNode do
     state = put(state, key, value, context)
 
     state =
-      get_alive_preference_list(state, key)
+      get_alive_preference_list_with_intended(state, key)
       # don't send put request to self
-      |> List.delete(state.id)
-      |> Enum.reduce(state, fn node, state_acc ->
+      |> Enum.reject(fn {node, _hint} -> node == state.id end)
+      |> Enum.reduce(state, fn {node, hint}, state_acc ->
         send_with_async_timeout(state_acc, node, %CoordinatorRequest.Put{
           nonce: nonce,
           key: key,
           value: value,
-          context: context
+          context: %{context | hint: hint}
         })
       end)
 
