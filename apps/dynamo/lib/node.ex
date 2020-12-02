@@ -104,13 +104,13 @@ defmodule DynamoNode do
     # only store data that you're concerned with
     # (i.e. you're in preference list for)
     store =
-       data
-        |> Enum.filter(fn {k, _v} ->
-            id in HashRing.find_nodes(ring, k, n)
-           end)
-        |> Map.new(fn {k, v} ->
-            {k, {[v], %Context{version: VectorClock.new()}}}
-           end)
+      data
+      |> Enum.filter(fn {k, _v} ->
+        id in HashRing.find_nodes(ring, k, n)
+      end)
+      |> Map.new(fn {k, v} ->
+        {k, {[v], %Context{version: VectorClock.new()}}}
+      end)
 
     nodes_alive =
       nodes
@@ -151,6 +151,7 @@ defmodule DynamoNode do
   @spec get_first_alive_coordinator(%DynamoNode{}, any()) :: any() | nil
   def get_first_alive_coordinator(state, key) do
     pref_list = get_preference_list(state, key)
+
     Enum.find(pref_list, nil, fn node ->
       node == state.id or state.nodes_alive[node] == true
     end)
@@ -162,10 +163,14 @@ defmodule DynamoNode do
   """
   @spec get_alive_preference_list(%DynamoNode{}, any()) :: [any()]
   def get_alive_preference_list(state, key) do
-    all_nodes_ordered = HashRing.find_nodes(state.ring, key, map_size(state.nodes_alive) + 1)
-    only_healthy = Enum.filter(all_nodes_ordered, fn node ->
-      node == state.id or state.nodes_alive[node] == true
-    end)
+    all_nodes_ordered =
+      HashRing.find_nodes(state.ring, key, map_size(state.nodes_alive) + 1)
+
+    only_healthy =
+      Enum.filter(all_nodes_ordered, fn node ->
+        node == state.id or state.nodes_alive[node] == true
+      end)
+
     Enum.take(only_healthy, state.n)
   end
 
@@ -195,6 +200,7 @@ defmodule DynamoNode do
         Logger.info("Received #{inspect(msg)} from #{inspect(client)}")
 
         coord = get_first_alive_coordinator(state, key)
+
         cond do
           is_valid_coordinator(state, key) ->
             # handle the request properly
@@ -212,6 +218,7 @@ defmodule DynamoNode do
                   request: msg
                 }
               )
+
             listener(state)
 
           coord == nil ->
@@ -222,6 +229,7 @@ defmodule DynamoNode do
               values: nil,
               context: nil
             })
+
             listener(state)
         end
 
@@ -229,6 +237,7 @@ defmodule DynamoNode do
         Logger.info("Received #{inspect(msg)} from #{inspect(client)}")
 
         coord = get_first_alive_coordinator(state, key)
+
         cond do
           is_valid_coordinator(state, key) ->
             # handle the request properly
@@ -256,6 +265,7 @@ defmodule DynamoNode do
               success: false,
               context: nil
             })
+
             listener(state)
         end
 
@@ -389,7 +399,7 @@ defmodule DynamoNode do
         listener(state)
 
       {node, :recovered} = msg ->
-        Logger.info("Received #{inspect msg}")
+        Logger.info("Received #{inspect(msg)}")
         state = mark_alive(state, node)
         listener(state)
 
@@ -436,7 +446,8 @@ defmodule DynamoNode do
     # we need to reduce over the list of nodes while calling it
     # to get the final state
     state =
-      Enum.reduce(get_alive_preference_list(state, key), state, fn node, state_acc ->
+      Enum.reduce(get_alive_preference_list(state, key), state, fn node,
+                                                                   state_acc ->
         # DO send get request to self
         send_with_async_timeout(state_acc, node, %CoordinatorRequest.Get{
           nonce: nonce,
