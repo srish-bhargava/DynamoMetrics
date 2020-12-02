@@ -31,8 +31,10 @@ defmodule DynamoNode do
     field :nodes_alive, %{required(any()) => boolean()}
 
     # Ongoing request timers for nodes this node has sent
-    # messages to, so that they can be cancelled
-    field :request_timers, %{required(any()) => reference()}
+    # messages to, so that they can be cancelled.
+    # This is a map from {nonce, node} => timer ref
+    # (because {node,nonce} uniquely identifies a coord-request)
+    field :request_timers, %{required({any(), Nonce.t()}) => reference()}
 
     # hash ring
     field :ring, ExHashRing.HashRing.t()
@@ -865,7 +867,7 @@ defmodule DynamoNode do
   end
 
   @doc """
-  Send msg to proc. Also start a timer to detect failure of proc.
+  Send msg to proc. Also start a timer to inform us to retry.
 
   This timer is set in state.request_timers, and should be
   cancelled if a message is received from proc.
@@ -881,15 +883,16 @@ defmodule DynamoNode do
     state
   end
 
-  @spec send_with_async_timeout(%DynamoNode{}, any(), any()) :: %DynamoNode{}
-  def send_with_async_timeout(state, node, msg) do
+  @spec send_with_async_timeout(%DynamoNode{}, any(), Nonce.t(), any(), any()) ::
+          %DynamoNode{}
+  def send_with_async_timeout(state, node, nonce, msg, timeout_msg) do
     send(node, msg)
 
     %{
       state
       | request_timers:
-          Map.put_new_lazy(state.request_timers, node, fn ->
-            timer(state.request_timeout, {:request_timeout, node})
+          Map.put_new_lazy(state.request_timers, {node, nonce}, fn ->
+            timer(state.request_timeout, timeout_msg)
           end)
     }
   end
