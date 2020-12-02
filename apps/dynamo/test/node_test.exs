@@ -33,7 +33,18 @@ defmodule DynamoNodeTest do
       handle =
         Process.monitor(
           spawn(:node, fn ->
-            DynamoNode.start(:node, %{}, [:node], 1, 1, 1, 1_000, 1_000, 9999)
+            DynamoNode.start(
+              :node,
+              %{},
+              [:node],
+              1,
+              1,
+              1,
+              1_000,
+              1_000,
+              9999,
+              100
+            )
           end)
         )
 
@@ -52,7 +63,7 @@ defmodule DynamoNodeTest do
       for node <- nodes do
         Process.monitor(
           spawn(node, fn ->
-            DynamoNode.start(node, %{}, nodes, 1, 1, 1, 1_000, 1_000, 9999)
+            DynamoNode.start(node, %{}, nodes, 1, 1, 1, 1_000, 1_000, 9999, 100)
           end)
         )
       end
@@ -81,7 +92,8 @@ defmodule DynamoNodeTest do
               1,
               1_000,
               1_000,
-              9999
+              9999,
+              100
             )
           end)
         )
@@ -113,7 +125,8 @@ defmodule DynamoNodeTest do
               1,
               1_000,
               1_000,
-              9999
+              9999,
+              100
             )
           end)
         )
@@ -137,7 +150,7 @@ defmodule DynamoNodeTest do
   end
 
   test "First get request returns the initial value" do
-    Cluster.start(%{foo: 42}, [:a, :b, :c], 3, 2, 2, 1_000, 1_000, 9999)
+    Cluster.start(%{foo: 42}, [:a, :b, :c], 3, 2, 2, 1_000, 1_000, 9999, 100)
 
     nonce = Nonce.new()
     send(:a, %ClientRequest.Get{nonce: nonce, key: :foo})
@@ -152,7 +165,7 @@ defmodule DynamoNodeTest do
   end
 
   test "Simple put request is successful" do
-    Cluster.start(%{}, [:a, :b, :c], 1, 1, 1, 1_000, 1_000, 9999)
+    Cluster.start(%{}, [:a, :b, :c], 1, 1, 1, 1_000, 1_000, 9999, 100)
 
     nonce = Nonce.new()
 
@@ -168,7 +181,7 @@ defmodule DynamoNodeTest do
   end
 
   test "get after a put returns the put value with empty initial data" do
-    Cluster.start(%{}, [:a, :b, :c], 1, 1, 1, 1_000, 1_000, 9999)
+    Cluster.start(%{}, [:a, :b, :c], 1, 1, 1, 1_000, 1_000, 9999, 100)
 
     nonce_put = Nonce.new()
     nonce_get = Nonce.new()
@@ -192,7 +205,7 @@ defmodule DynamoNodeTest do
   end
 
   test "put request overwrites key in initial data" do
-    Cluster.start(%{foo: 37}, [:a, :b, :c], 1, 1, 1, 1_000, 1_000, 9999)
+    Cluster.start(%{foo: 37}, [:a, :b, :c], 1, 1, 1, 1_000, 1_000, 9999, 100)
 
     nonce_put = Nonce.new()
     nonce_get = Nonce.new()
@@ -220,7 +233,7 @@ defmodule DynamoNodeTest do
 
     nodes = [:a, :b, :c, :d, :e, :f]
 
-    Cluster.start(data, nodes, 4, 3, 2, 1_000, 1_000, 9999)
+    Cluster.start(data, nodes, 4, 3, 2, 1_000, 1_000, 9999, 100)
 
     for {key, value} <- data do
       nonce = Nonce.new()
@@ -242,7 +255,7 @@ defmodule DynamoNodeTest do
 
     nodes = [:a, :b, :c, :d, :e, :f]
 
-    Cluster.start(data, nodes, 4, 3, 2, 1_000, 1_000, 9999)
+    Cluster.start(data, nodes, 4, 3, 2, 1_000, 1_000, 9999, 100)
 
     for {key, _value} <- data do
       nonce = Nonce.new()
@@ -280,7 +293,18 @@ defmodule DynamoNodeTest do
     # make sure the node we send to is a valid coordinator
     # by making everyone a valid coordinator
     spawn(:a, fn ->
-      DynamoNode.start(:a, %{foo: 42}, [:a, :b, :c], 3, 3, 3, 500, 1_000, 9999)
+      DynamoNode.start(
+        :a,
+        %{foo: 42},
+        [:a, :b, :c],
+        3,
+        3,
+        3,
+        500,
+        1_000,
+        9999,
+        100
+      )
     end)
 
     nonce = Nonce.new()
@@ -299,7 +323,18 @@ defmodule DynamoNodeTest do
     # make sure the node we send to is a valid coordinator
     # by making everyone a valid coordinator
     spawn(:a, fn ->
-      DynamoNode.start(:a, %{foo: 42}, [:a, :b, :c], 3, 3, 3, 500, 1_000, 9999)
+      DynamoNode.start(
+        :a,
+        %{foo: 42},
+        [:a, :b, :c],
+        3,
+        3,
+        3,
+        500,
+        1_000,
+        9999,
+        100
+      )
     end)
 
     nonce = Nonce.new()
@@ -323,7 +358,18 @@ defmodule DynamoNodeTest do
     data = Map.new(1..1000, fn k -> {k, k} end)
 
     spawn(:a, fn ->
-      DynamoNode.start(:a, data, [:a, :test_proc], 1, 1, 1, 500, 1_000, 9999)
+      DynamoNode.start(
+        :a,
+        data,
+        [:a, :test_proc],
+        1,
+        1,
+        1,
+        500,
+        1_000,
+        9999,
+        100
+      )
     end)
 
     send(:a, :crash)
@@ -371,7 +417,18 @@ defmodule DynamoNodeTest do
     data = Map.new(1..10, fn k -> {k, k} end)
 
     spawn(:a, fn ->
-      DynamoNode.start(:a, data, [:a, :test_proc], 1, 1, 1, 500, 1_000, 9999)
+      DynamoNode.start(
+        :a,
+        data,
+        [:a, :test_proc],
+        1,
+        1,
+        1,
+        500,
+        1_000,
+        9999,
+        100
+      )
     end)
 
     send(:a, :crash)
@@ -417,7 +474,7 @@ defmodule DynamoNodeTest do
 
   test "Crashed node responds to messages after recovery" do
     spawn(:a, fn ->
-      DynamoNode.start(:a, %{foo: 42}, [:a], 1, 1, 1, 500, 1_000, 9999)
+      DynamoNode.start(:a, %{foo: 42}, [:a], 1, 1, 1, 500, 1_000, 9999, 100)
     end)
 
     send(:a, :crash)
@@ -433,7 +490,7 @@ defmodule DynamoNodeTest do
 
   test "Node considers all nodes healthy on startup" do
     nodes = [:a, :b, :c]
-    Cluster.start(%{}, nodes, 3, 1, 1, 1_000, 1_000, 200)
+    Cluster.start(%{}, nodes, 3, 1, 1, 1_000, 1_000, 200, 100)
 
     expected_nodes_alive = Map.new(nodes, fn node -> {node, true} end)
 
@@ -446,7 +503,17 @@ defmodule DynamoNodeTest do
   end
 
   test "Coordinator considers crashed node dead after coord requests" do
-    Cluster.start(%{foo: 42}, [:a, :gonna_crash], 2, 2, 2, 1_000, 1_000, 200)
+    Cluster.start(
+      %{foo: 42},
+      [:a, :gonna_crash],
+      2,
+      2,
+      2,
+      1_000,
+      1_000,
+      200,
+      100
+    )
 
     send(:gonna_crash, :crash)
 
@@ -469,7 +536,17 @@ defmodule DynamoNodeTest do
   end
 
   test "Coordinator considers recovered crashed node alive" do
-    Cluster.start(%{foo: 42}, [:a, :gonna_crash], 2, 2, 2, 1_000, 1_000, 200)
+    Cluster.start(
+      %{foo: 42},
+      [:a, :gonna_crash],
+      2,
+      2,
+      2,
+      1_000,
+      1_000,
+      200,
+      100
+    )
 
     send(:gonna_crash, :crash)
 
@@ -500,7 +577,7 @@ defmodule DynamoNodeTest do
 
   test "Follower considers crashed coordinator dead after trying to redirect" do
     data = Map.new(1..100, fn key -> {key, key * 42} end)
-    Cluster.start(data, [:a, :gonna_crash], 1, 1, 1, 1_000, 1_000, 200)
+    Cluster.start(data, [:a, :gonna_crash], 1, 1, 1, 1_000, 1_000, 200, 100)
 
     send(:gonna_crash, :crash)
 
@@ -527,7 +604,7 @@ defmodule DynamoNodeTest do
 
   test "Follower considers recovered crashed coordinator alive" do
     data = Map.new(1..100, fn key -> {key, key * 42} end)
-    Cluster.start(data, [:a, :gonna_crash], 1, 1, 1, 1_000, 1_000, 200)
+    Cluster.start(data, [:a, :gonna_crash], 1, 1, 1, 1_000, 1_000, 200, 100)
 
     send(:gonna_crash, :crash)
 
@@ -579,6 +656,7 @@ defmodule DynamoNodeTest do
         coordinator_timeout: nil,
         redirect_timeout: nil,
         request_timeout: nil,
+        alive_check_interval: nil,
         pending_gets: nil,
         pending_puts: nil
       }
@@ -610,6 +688,7 @@ defmodule DynamoNodeTest do
         coordinator_timeout: nil,
         redirect_timeout: nil,
         request_timeout: nil,
+        alive_check_interval: nil,
         pending_gets: nil,
         pending_puts: nil
       }
@@ -644,6 +723,7 @@ defmodule DynamoNodeTest do
         coordinator_timeout: nil,
         redirect_timeout: nil,
         request_timeout: nil,
+        alive_check_interval: nil,
         pending_gets: nil,
         pending_puts: nil
       }

@@ -22,6 +22,7 @@ defmodule Cluster do
           pos_integer(),
           pos_integer(),
           pos_integer(),
+          pos_integer(),
           pos_integer()
         ) ::
           :ok
@@ -33,7 +34,8 @@ defmodule Cluster do
         w,
         coordinator_timeout,
         redirect_timeout,
-        request_timeout
+        request_timeout,
+        alive_check_interval
       ) do
     Enum.each(nodes, fn node ->
       spawn(node, fn ->
@@ -46,7 +48,8 @@ defmodule Cluster do
           w,
           coordinator_timeout,
           redirect_timeout,
-          request_timeout
+          request_timeout,
+          alive_check_interval
         )
       end)
     end)

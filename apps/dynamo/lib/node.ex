@@ -55,6 +55,10 @@ defmodule DynamoNode do
     # a response from another node
     field :request_timeout, pos_integer()
 
+    # Number of milliseconds a node should wait before
+    # checking on nodes it thinks are dead
+    field :alive_check_interval, pos_integer()
+
     # pending client get requests being handled by this node as coordinator.
     # Importantly, if a request has been dispatched to other nodes
     # but no coordinator responses have been received yet, then the
@@ -96,6 +100,7 @@ defmodule DynamoNode do
           pos_integer(),
           pos_integer(),
           pos_integer(),
+          pos_integer(),
           pos_integer()
         ) ::
           no_return()
@@ -108,7 +113,8 @@ defmodule DynamoNode do
         w,
         coordinator_timeout,
         redirect_timeout,
-        request_timeout
+        request_timeout,
+        alive_check_interval
       ) do
     Logger.info("Starting node #{inspect(id)}")
     Logger.metadata(id: id)
@@ -144,6 +150,7 @@ defmodule DynamoNode do
       coordinator_timeout: coordinator_timeout,
       redirect_timeout: redirect_timeout,
       request_timeout: request_timeout,
+      alive_check_interval: alive_check_interval,
       pending_gets: %{},
       pending_puts: %{}
     }
@@ -790,6 +797,7 @@ defmodule DynamoNode do
       coordinator_timeout: state.coordinator_timeout,
       redirect_timeout: state.redirect_timeout,
       request_timeout: state.request_timeout,
+      alive_check_interval: state.alive_check_interval,
       pending_gets: %{},
       pending_puts: %{}
     }
