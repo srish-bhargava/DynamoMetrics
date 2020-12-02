@@ -1,11 +1,12 @@
 defmodule Context do
   use TypedStruct
 
-  typedstruct enforce: true do
+  typedstruct do
     @typedoc """
     Context for values in a key-value store.
     """
-    field :version, VectorClock.t()
+    field :version, VectorClock.t(), enforce: true
+    field :hint, any() | nil, default: nil
   end
 end
 
