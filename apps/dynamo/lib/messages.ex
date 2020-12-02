@@ -160,9 +160,20 @@ defmodule HandoffRequest do
     @typedoc """
     Handoff hinted data to original owner.
     """
-    field :nonce, Nonce.t()
     field :key, any()
     field :values, [any()]
+    field :context, %Context{}
+  end
+end
+
+defmodule HandoffResponse do
+  use TypedStruct
+
+  typedstruct enforce: true do
+    @typedoc """
+    Handoff acknowledgement.
+    """
+    field :key, any()
     field :context, %Context{}
   end
 end
