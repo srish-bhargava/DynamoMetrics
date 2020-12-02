@@ -464,7 +464,7 @@ defmodule DynamoNode do
       # health checks
       :alive_check_interval = msg ->
         # time to check on dead nodes' health
-        Logger.info("Received #{inspect(msg)}")
+        Logger.debug("Received #{inspect(msg)}")
 
         for {node, false} <- state.nodes_alive do
           # don't start a timeout on this msg since
