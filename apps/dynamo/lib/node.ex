@@ -433,6 +433,7 @@ defmodule DynamoNode do
       {node, :recovered} = msg ->
         Logger.info("Received #{inspect(msg)}")
         state = mark_alive(state, node)
+        state = handoff_hinted_data(state, node)
         listener(state)
 
       # testing
@@ -837,5 +838,31 @@ defmodule DynamoNode do
       | nodes_alive: Map.replace!(state.nodes_alive, node, true),
         liveness_timers: new_liveness_timers
     }
+  end
+
+  @doc """
+  Send data meant for `node` to it, assuming that it has come back alive.
+  Get rid of the corresponding entries in our own store.
+  """
+  @spec handoff_hinted_data(%DynamoNode{}, any()) :: %DynamoNode{}
+  def handoff_hinted_data(state, node) do
+    handoff_data =
+      Enum.filter(state.store, fn {_key, {_values, context}} ->
+        context.hint == node
+      end)
+
+    Enum.reduce(handoff_data, state, fn {key, {values, context}}, state_acc ->
+      send_with_async_timeout(state_acc, node, %HandoffRequest{
+        nonce: Nonce.new(),
+        key: key,
+        values: values,
+        context: context
+      })
+    end)
+
+    {_, handoff_removed_store} =
+      Map.split(state.store, Enum.map(handoff_data, fn {key, _} -> key end))
+
+    %{state | store: handoff_removed_store}
   end
 end

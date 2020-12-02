@@ -153,6 +153,20 @@ defmodule RedirectedClientRequest do
   end
 end
 
+defmodule HandoffRequest do
+  use TypedStruct
+
+  typedstruct enforce: true do
+    @typedoc """
+    Handoff hinted data to original owner.
+    """
+    field :nonce, Nonce.t()
+    field :key, any()
+    field :value, any()
+    field :context, %Context{}
+  end
+end
+
 defmodule TestRequest do
   use TypedStruct
 
