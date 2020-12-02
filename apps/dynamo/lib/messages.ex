@@ -8,6 +8,31 @@ defmodule Context do
     field :version, VectorClock.t(), enforce: true
     field :hint, any() | nil, default: nil
   end
+
+  def compare(ctx1, ctx2) do
+    VectorClock.compare(ctx1, ctx2)
+  end
+
+  def combine(ctx1, ctx2) do
+    case compare(ctx1, ctx2) do
+      :before ->
+        ctx2
+
+      :after ->
+        ctx1
+
+      :concurrent ->
+        %Context{
+          version: VectorClock.combine(ctx1.version, ctx2.version),
+          hint:
+            if ctx1.hint != nil do
+              ctx1.hint
+            else
+              ctx2.hint
+            end
+        }
+    end
+  end
 end
 
 defmodule ClientRequest.Get do
