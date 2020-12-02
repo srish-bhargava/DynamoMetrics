@@ -88,6 +88,14 @@ defmodule DynamoNode do
         responses: MapSet.t(any())
       }
     }
+
+    field :pending_redirects, %{
+      required(Nonce.t()) => %{
+        client: any(),
+        msg: %ClientRequest.Get{} | %ClientRequest.Put{},
+        get_or_put: :get | :put
+      }
+    }
   end
 
   @doc """
@@ -154,7 +162,8 @@ defmodule DynamoNode do
       request_timeout: request_timeout,
       alive_check_interval: alive_check_interval,
       pending_gets: %{},
-      pending_puts: %{}
+      pending_puts: %{},
+      pending_redirects: %{}
     }
 
     timer(state.alive_check_interval, :alive_check_interval)
@@ -251,15 +260,18 @@ defmodule DynamoNode do
     }
   end
 
+  def client_fail_msg(get_or_put, nonce) do
+    if get_or_put == :get do
+      client_get_fail_msg(nonce)
+    else
+      client_put_fail_msg(nonce)
+    end
+  end
+
   @doc """
   Handle, redirect, or reply failure to an incoming client request.
   """
-  def handle_client_request(
-        state,
-        received_msg,
-        client,
-        get_or_put
-      ) do
+  def handle_client_request(state, msg, client, get_or_put) do
     coord_handler =
       if get_or_put == :get do
         &coord_handle_get_req/3
@@ -267,31 +279,70 @@ defmodule DynamoNode do
         &coord_handle_put_req/3
       end
 
-    fail_msg =
-      if get_or_put == :get do
-        client_get_fail_msg(received_msg.nonce)
-      else
-        client_put_fail_msg(received_msg.nonce)
-      end
+    if is_valid_coordinator(state, msg.key) do
+      # handle the request as coordinator
+      coord_handler.(state, client, msg)
+    else
+      # start a timer so we know to stop retrying redirects
+      timer(
+        state.redirect_timeout,
+        {:total_redirect_timeout, msg.nonce}
+      )
+
+      # put it in pending redirects
+      state = %{
+        state
+        | pending_redirects:
+            Map.put(state.pending_redirects, msg.nonce, %{
+              client: client,
+              msg: msg,
+              get_or_put: get_or_put
+            })
+      }
+
+      # redirect the request
+      redirect_or_fail_client_request(state, msg.nonce)
+    end
+  end
+
+  @doc """
+  Redirect, or reply failure to an incoming
+  client request after a redirect failure.
+  """
+  @spec redirect_or_fail_client_request(%DynamoNode{}, Nonce.t()) ::
+          %DynamoNode{}
+  def redirect_or_fail_client_request(state, nonce) do
+    %{
+      client: client,
+      msg: received_msg,
+      get_or_put: get_or_put
+    } = Map.fetch!(state.pending_redirects, nonce)
 
     coord = get_first_alive_coordinator(state, received_msg.key)
 
     cond do
-      is_valid_coordinator(state, received_msg.key) ->
-        # handle the request as coordinator
-        coord_handler.(state, client, received_msg)
-
       coord != nil ->
         # redirect to coordinator
-        send_with_async_timeout(state, coord, %RedirectedClientRequest{
-          client: client,
-          request: received_msg
-        })
+        state =
+          send_with_async_timeout(
+            state,
+            coord,
+            %RedirectedClientRequest{
+              client: client,
+              request: received_msg
+            },
+            {:redirect_timeout, nonce, coord}
+          )
 
       coord == nil ->
         # no valid coordinator, reply failure
-        send(client, fail_msg)
-        state
+        send(client, client_fail_msg(get_or_put, nonce))
+
+        # client request taken care of, no need to redirect anymore
+        %{
+          state
+          | pending_redirects: Map.delete!(state.pending_redirects, nonce)
+        }
     end
   end
 
@@ -308,7 +359,7 @@ defmodule DynamoNode do
         listener(state)
 
       # client requests
-      {client, %ClientRequest.Get{nonce: nonce} = msg} ->
+      {client, %ClientRequest.Get{} = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(client)}")
 
         state =
@@ -316,18 +367,12 @@ defmodule DynamoNode do
             state,
             msg,
             client,
-            &coord_handle_get_req/3,
-            %ClientResponse.Get{
-              nonce: nonce,
-              success: false,
-              values: nil,
-              context: nil
-            }
+            :get
           )
 
         listener(state)
 
-      {client, %ClientRequest.Put{nonce: nonce} = msg} ->
+      {client, %ClientRequest.Put{} = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(client)}")
 
         state =
@@ -335,12 +380,7 @@ defmodule DynamoNode do
             state,
             msg,
             client,
-            &coord_handle_put_req/3,
-            %ClientResponse.Put{
-              nonce: nonce,
-              success: false,
-              context: nil
-            }
+            :put
           )
 
         listener(state)
@@ -373,6 +413,13 @@ defmodule DynamoNode do
       # coordinator requests
       {coordinator, %CoordinatorRequest.Get{nonce: nonce, key: key} = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(coordinator)}")
+
+        # request has been handler (in case we were trying to redirect it)
+        state = %{
+          state
+          | pending_redirects: Map.delete!(state.pending_redirects, nonce)
+        }
+
         state = mark_alive(state, coordinator)
 
         stored = Map.get(state.store, key)
@@ -401,6 +448,13 @@ defmodule DynamoNode do
          context: context
        } = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(coordinator)}")
+
+        # request has been handler (in case we were trying to redirect it)
+        state = %{
+          state
+          | pending_redirects: Map.delete!(state.pending_redirects, nonce)
+        }
+
         state = mark_alive(state, coordinator)
         state = put(state, key, [value], context)
 
@@ -516,16 +570,41 @@ defmodule DynamoNode do
           })
         end
 
-      {:request_timeout, node} = msg ->
-        # mark this node dead
+      # redirect timeouts
+      {:total_redirect_timeout, nonce} = msg ->
+        # time up for redirect attempts, give up now
         Logger.info("Received #{inspect(msg)}")
 
-        state = %{
-          state
-          | nodes_alive: Map.replace!(state.nodes_alive, node, false)
-        }
+        case Map.get(state.pending_redirects, nonce) do
+          nil ->
+            # request already been handled
+            listener(state)
 
-        listener(state)
+          %{client: client, get_or_put: get_or_put} ->
+            # pending for too long, just fail the request
+            send(client, client_fail_msg(get_or_put, nonce))
+
+            state = %{
+              state
+              | pending_redirects: Map.delete!(state.pending_redirects, nonce)
+            }
+
+            listener(state)
+        end
+
+      {:redirect_timeout, nonce, failed_coord} = msg ->
+        # redirect attempt failed, try again
+        Logger.info("Received #{inspect(msg)}")
+
+        if not Map.has_key?(state.pending_redirects, nonce) do
+          # request already been handled successfully
+          listener(state)
+        else
+          # retry redirecting
+          state = mark_dead(state, failed_coord)
+          state = redirect_or_fail_client_request(state, nonce)
+          listener(state)
+        end
 
       # health checks
       :alive_check_interval = msg ->
@@ -887,7 +966,8 @@ defmodule DynamoNode do
       request_timeout: state.request_timeout,
       alive_check_interval: state.alive_check_interval,
       pending_gets: %{},
-      pending_puts: %{}
+      pending_puts: %{},
+      pending_redirects: %{}
     }
 
     crash_wait_loop()
@@ -904,7 +984,8 @@ defmodule DynamoNode do
 
   Doesn't reset timer if it already exists.
   """
-  def send_with_async_timeout(state, node, msg) when state.id == node do
+  def send_with_async_timeout(state, node, msg, _timeout_msg)
+      when state.id == node do
     # since we deal with the weird situation where we might
     # end up sending messages to ourself (see: `coord_handle_get_req`),
     # checking that we're not keeping track of our own liveness status
