@@ -3,7 +3,7 @@ defmodule Cluster do
   A DynamoDB cluster.
   """
   # override Kernel's functions with Emulation's
-  import Emulation, only: [spawn: 2, send: 2, timer: 1, now: 0, whoami: 0]
+  import Emulation, only: [spawn: 2]
 
   import Kernel,
     except: [spawn: 3, spawn: 1, spawn_link: 1, spawn_link: 3, send: 2]
