@@ -573,7 +573,7 @@ defmodule DynamoNodeTest do
         nodes_alive: Map.delete(nodes_alive, node),
         # -- unused --
         store: nil,
-        liveness_timers: nil,
+        request_timers: nil,
         r: nil,
         w: nil,
         coordinator_timeout: nil,
@@ -604,7 +604,7 @@ defmodule DynamoNodeTest do
         nodes_alive: Map.delete(nodes_alive, node),
         # -- unused --
         store: nil,
-        liveness_timers: nil,
+        request_timers: nil,
         r: nil,
         w: nil,
         coordinator_timeout: nil,
@@ -638,7 +638,7 @@ defmodule DynamoNodeTest do
         nodes_alive: Map.delete(nodes_alive, node),
         # -- unused --
         store: nil,
-        liveness_timers: nil,
+        request_timers: nil,
         r: nil,
         w: nil,
         coordinator_timeout: nil,

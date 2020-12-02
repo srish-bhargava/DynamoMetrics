@@ -32,7 +32,7 @@ defmodule DynamoNode do
 
     # Ongoing request timers for nodes this node has sent
     # messages to, so that they can be cancelled
-    field :liveness_timers, %{required(any()) => reference()}
+    field :request_timers, %{required(any()) => reference()}
 
     # hash ring
     field :ring, ExHashRing.HashRing.t()
@@ -136,7 +136,7 @@ defmodule DynamoNode do
       id: id,
       store: store,
       nodes_alive: nodes_alive,
-      liveness_timers: %{},
+      request_timers: %{},
       ring: ring,
       n: n,
       r: r,
@@ -782,7 +782,7 @@ defmodule DynamoNode do
       store: state.store,
       nodes_alive:
         Map.new(state.nodes_alive, fn {node, _alive} -> {node, true} end),
-      liveness_timers: %{},
+      request_timers: %{},
       ring: state.ring,
       n: state.n,
       r: state.r,
@@ -796,18 +796,13 @@ defmodule DynamoNode do
 
     crash_wait_loop()
 
-    # inform others you have recovered
-    Enum.each(Map.keys(state.nodes_alive), fn node ->
-      send(node, :recovered)
-    end)
-
     wiped_state
   end
 
   @doc """
   Send msg to proc. Also start a timer to detect failure of proc.
 
-  This timer is set in state.liveness_timers, and should be
+  This timer is set in state.request_timers, and should be
   cancelled if a message is received from proc.
 
   Doesn't reset timer if it already exists.
@@ -827,8 +822,8 @@ defmodule DynamoNode do
 
     %{
       state
-      | liveness_timers:
-          Map.put_new_lazy(state.liveness_timers, node, fn ->
+      | request_timers:
+          Map.put_new_lazy(state.request_timers, node, fn ->
             timer(state.request_timeout, {:request_timeout, node})
           end)
     }
@@ -850,7 +845,7 @@ defmodule DynamoNode do
 
   @spec mark_alive(%DynamoNode{}, any()) :: %DynamoNode{}
   def mark_alive(state, node) do
-    {node_timer, new_liveness_timers} = Map.pop(state.liveness_timers, node)
+    {node_timer, new_request_timers} = Map.pop(state.request_timers, node)
 
     if node_timer != nil do
       cancel_timer(node_timer)
@@ -859,7 +854,7 @@ defmodule DynamoNode do
     %{
       state
       | nodes_alive: Map.replace!(state.nodes_alive, node, true),
-        liveness_timers: new_liveness_timers
+        request_timers: new_request_timers
     }
   end
 
