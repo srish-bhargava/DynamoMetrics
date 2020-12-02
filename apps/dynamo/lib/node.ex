@@ -372,10 +372,9 @@ defmodule DynamoNode do
         state = mark_alive(state, coordinator)
         state = put(state, key, [value], context)
 
-        state =
-          send_with_async_timeout(state, coordinator, %CoordinatorResponse.Put{
-            nonce: nonce
-          })
+        send(coordinator, %CoordinatorResponse.Put{
+          nonce: nonce
+        })
 
         listener(state)
 
