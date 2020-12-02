@@ -2,6 +2,8 @@ defmodule DynamoNodeTest do
   use ExUnit.Case
   doctest DynamoNode
 
+  require Logger
+
   import Emulation, only: [spawn: 2, send: 2]
 
   import Kernel,
@@ -731,6 +733,90 @@ defmodule DynamoNodeTest do
 
       assert nil not in alive_pref_order
       assert alive_pref_order == Enum.sort(alive_pref_order)
+    end
+  end
+
+  test "coordinator sends correct hints for nodes it thinks are dead" do
+    nodes = [:a, :b, :c, :d]
+
+    Cluster.start(
+      %{foo: 42},
+      nodes,
+      3,
+      1,
+      3,
+      1000,
+      1000,
+      500,
+      9999
+    )
+
+    ring = HashRing.new(nodes, 1)
+    pref_order = HashRing.find_nodes(ring, :foo, 3)
+    [first_pref, second_pref, _third_pref] = pref_order
+
+    Logger.debug("preference order: #{inspect(pref_order)}")
+
+    send(second_pref, :crash)
+
+    # make first_pref know second_pref has crashed
+    send(first_pref, %ClientRequest.Put{
+      nonce: Nonce.new(),
+      key: :foo,
+      value: 100,
+      context: new_context()
+    })
+
+    wait(1500)
+
+    send(first_pref, %ClientRequest.Put{
+      nonce: Nonce.new(),
+      key: :foo,
+      value: 500,
+      context: %Context{version: %{first_pref => 1}}
+    })
+
+    wait(1000)
+
+    # get states of all nodes (except the one that crashed)
+    nonces =
+      for node <- nodes, node != second_pref, into: [] do
+        nonce = Nonce.new()
+        send(node, %TestRequest{nonce: nonce})
+        {node, nonce}
+      end
+
+    states =
+      for {node, nonce} <- nonces, into: [] do
+        assert_receive %TestResponse{
+                         nonce: ^nonce,
+                         state: state
+                       },
+                       500
+
+        {node, state}
+      end
+
+    # check that atleast one of the states must contain a hint
+    hinted_node_and_state =
+      Enum.find(
+        states,
+        fn {_node, state} ->
+          case Map.get(state.store, :foo) do
+            nil -> false
+            {_values, context} -> context.hint == second_pref
+          end
+        end
+      )
+
+    case hinted_node_and_state do
+      nil ->
+        raise "Hint to nobody"
+
+      {node, state} ->
+        assert node not in pref_order, "Hint to someone in top n"
+        {values, _ctx} = Map.get(state.store, :foo)
+        assert values == [500], "Wrong value"
     end
   end
 end
