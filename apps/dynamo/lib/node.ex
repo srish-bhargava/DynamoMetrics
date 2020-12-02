@@ -895,6 +895,17 @@ defmodule DynamoNode do
   end
 
   @doc """
+  Mark a node dead in state.
+  """
+  def mark_dead(state, node) when state.id == node do
+    state
+  end
+
+  def mark_dead(state, node) do
+    Map.replace!(state.nodes_alive, node, false)
+  end
+
+  @doc """
   Mark a node alive, and do pending operations related to them (handoff).
 
   We do this by setting its entry in state.nodes_alive to true
