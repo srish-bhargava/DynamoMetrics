@@ -899,8 +899,8 @@ defmodule DynamoNode do
         context.hint == node
       end)
 
-    Enum.reduce(handoff_data, state, fn {key, {values, context}}, state_acc ->
-      send_with_async_timeout(state_acc, node, %HandoffRequest{
+    Enum.each(handoff_data, fn {key, {values, context}} ->
+      send(node, %HandoffRequest{
         nonce: Nonce.new(),
         key: key,
         values: values,
