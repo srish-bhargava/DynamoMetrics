@@ -28,6 +28,14 @@ defmodule DynamoNodeTest do
     :ok
   end
 
+  # Wait for timeout milliseconds
+  defp wait(timeout) do
+    receive do
+    after
+      timeout -> true
+    end
+  end
+
   describe "No crashes" do
     test "during startup of a single node" do
       handle =
@@ -269,10 +277,7 @@ defmodule DynamoNodeTest do
     end
 
     # wait a bit for the system to settle
-    receive do
-    after
-      1_000 -> true
-    end
+    wait(1_000)
 
     for key <- Map.keys(data) do
       nonce = Nonce.new()
@@ -524,10 +529,7 @@ defmodule DynamoNodeTest do
     })
 
     # wait for the dust to settle
-    receive do
-    after
-      1_200 -> true
-    end
+    wait(1_200)
 
     nonce = Nonce.new()
     send(:a, %TestRequest{nonce: nonce})
@@ -557,17 +559,11 @@ defmodule DynamoNodeTest do
     })
 
     # wait for the dust to settle
-    receive do
-    after
-      1_200 -> true
-    end
+    wait(1_200)
 
     send(:gonna_crash, :recover)
 
-    receive do
-    after
-      500 -> true
-    end
+    wait(500)
 
     nonce = Nonce.new()
     send(:a, %TestRequest{nonce: nonce})
@@ -591,10 +587,7 @@ defmodule DynamoNodeTest do
     end)
 
     # wait for the dust to settle
-    receive do
-    after
-      1_200 -> true
-    end
+    wait(1_200)
 
     nonce = Nonce.new()
     send(:a, %TestRequest{nonce: nonce})
@@ -618,17 +611,11 @@ defmodule DynamoNodeTest do
     end)
 
     # wait for the dust to settle
-    receive do
-    after
-      1_200 -> true
-    end
+    wait(1_200)
 
     send(:gonna_crash, :recover)
 
-    receive do
-    after
-      500 -> true
-    end
+    wait(500)
 
     nonce = Nonce.new()
     send(:a, %TestRequest{nonce: nonce})
