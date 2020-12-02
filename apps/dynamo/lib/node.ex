@@ -376,7 +376,14 @@ defmodule DynamoNode do
           nonce: nonce
         })
 
-        listener(state)
+        if context.hint != nil and
+             Map.get(state.nodes_alive, context.hint) == true do
+          # try handing off hinted data right away
+          state = handoff_hinted_data(state, context.hint)
+          listener(state)
+        else
+          listener(state)
+        end
 
       # node responses to coordinator requests
       {node, %CoordinatorResponse.Get{} = msg} ->
@@ -401,6 +408,34 @@ defmodule DynamoNode do
         Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
         state = mark_alive(state, node)
         state = put(state, key, values, context)
+
+        # send acknowledgement
+        send(node, %HandoffResponse{key: key, context: context})
+
+        listener(state)
+
+      {node, %HandoffResponse{key: key, context: context} = msg} ->
+        Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
+        state = mark_alive(state, node)
+
+        stored = Map.get(state.store, key)
+
+        state =
+          case stored do
+            nil ->
+              state
+
+            {_values, stored_context} ->
+              if Context.compare(stored_context, context) == :after do
+                # we have newer context to hand off, so don't get rid of key
+                state
+              else
+                # we have handed off this key successfully and we don't
+                # have newer version - get rid of the key
+                %{state | store: Map.delete(state.store, key)}
+              end
+          end
+
         listener(state)
 
       # timeouts
@@ -860,7 +895,7 @@ defmodule DynamoNode do
   end
 
   @doc """
-  Mark a node alive.
+  Mark a node alive, and do pending operations related to them (handoff).
 
   We do this by setting its entry in state.nodes_alive to true
   and by resetting and removing its liveness timer (if it has one).
@@ -881,16 +916,23 @@ defmodule DynamoNode do
       cancel_timer(node_timer)
     end
 
-    %{
+    state = %{
       state
       | nodes_alive: Map.replace!(state.nodes_alive, node, true),
         request_timers: new_request_timers
     }
+
+    # do pending operations for this node
+    state = handoff_hinted_data(state, node)
+
+    state
   end
 
   @doc """
-  Send data meant for `node` to it, assuming that it has come back alive.
-  Get rid of the corresponding entries in our own store.
+  Send data meant for `node` to it,
+  assuming that it has come back alive.
+  Don't get rid of the handoff data just yet;
+  wait for the acknowledgement.
   """
   @spec handoff_hinted_data(%DynamoNode{}, any()) :: %DynamoNode{}
   def handoff_hinted_data(state, node) do
@@ -899,18 +941,15 @@ defmodule DynamoNode do
         context.hint == node
       end)
 
-    Enum.each(handoff_data, fn {key, {values, context}} ->
-      send(node, %HandoffRequest{
-        nonce: Nonce.new(),
-        key: key,
-        values: values,
-        context: context
-      })
-    end)
+    state =
+      Enum.reduce(handoff_data, state, fn {key, {values, context}}, state_acc ->
+        send_with_async_timeout(state_acc, node, %HandoffRequest{
+          key: key,
+          values: values,
+          context: context
+        })
+      end)
 
-    {_, handoff_removed_store} =
-      Map.split(state.store, Enum.map(handoff_data, fn {key, _} -> key end))
-
-    %{state | store: handoff_removed_store}
+    state
   end
 end
