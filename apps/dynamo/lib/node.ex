@@ -186,16 +186,15 @@ defmodule DynamoNode do
     orig_pref_list = get_preference_list(state, key)
     alive_pref_list = get_alive_preference_list(state, key)
 
-    Enum.zip(alive_pref_list, orig_pref_list)
-    |> Enum.map(fn {actual, orig} ->
-      intended =
-        if actual == orig do
-          nil
-        else
-          orig
-        end
+    dead_origs = orig_pref_list -- alive_pref_list
 
-      {actual, intended}
+    unintendeds =
+      Enum.filter(alive_pref_list, fn node -> node not in orig_pref_list end)
+
+    hints = Map.new(Enum.zip(unintendeds, dead_origs))
+
+    Enum.map(alive_pref_list, fn node ->
+      {node, Map.get(hints, node)}
     end)
   end
 
