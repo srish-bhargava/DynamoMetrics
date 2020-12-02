@@ -155,6 +155,8 @@ defmodule DynamoNode do
       pending_puts: %{}
     }
 
+    timer(state.alive_check_interval, :alive_check_interval)
+
     listener(state)
   end
 
@@ -459,10 +461,30 @@ defmodule DynamoNode do
 
         listener(state)
 
-      {node, :recovered} = msg ->
+      # health checks
+      :alive_check_interval = msg ->
+        # time to check on dead nodes' health
         Logger.info("Received #{inspect(msg)}")
+
+        for {node, false} <- state.nodes_alive do
+          # don't start a timeout on this msg since
+          # we already consider these dead
+          send(node, :alive_check_request)
+        end
+
+        timer(state.alive_check_interval, :alive_check_interval)
+        listener(state)
+
+      {node, :alive_check_request = msg} ->
+        Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
         state = mark_alive(state, node)
-        state = handoff_hinted_data(state, node)
+        # don't start a timeout, since we just found out it's alive
+        send(node, :alive_check_response)
+        listener(state)
+
+      {node, :alive_check_response = msg} ->
+        Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
+        state = mark_alive(state, node)
         listener(state)
 
       # testing
