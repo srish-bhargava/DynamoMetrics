@@ -711,7 +711,7 @@ defmodule DynamoNode do
   @spec merge_values({[any()], %Context{}}, {[any()], %Context{}}) ::
           {[any()], %Context{}}
   def merge_values({vals1, context1} = value1, {vals2, context2} = value2) do
-    case VectorClock.compare(context1.version, context2.version) do
+    case Context.compare(context1, context2) do
       :before ->
         value2
 
@@ -724,10 +724,7 @@ defmodule DynamoNode do
           |> Enum.sort()
           |> Enum.dedup()
 
-        {all_vals,
-         %Context{
-           version: VectorClock.combine(context1.version, context2.version)
-         }}
+        {all_vals, Context.combine(context1, context2)}
     end
   end
 
