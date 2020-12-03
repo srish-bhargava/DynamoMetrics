@@ -30,12 +30,6 @@ defmodule DynamoNode do
     # i.e. is this node alive or (transiently) dead?
     field :nodes_alive, %{required(any()) => boolean()}
 
-    # Ongoing request timers for nodes this node has sent
-    # messages to, so that they can be cancelled.
-    # This is a map from {nonce, node} => timer ref
-    # (because {node,nonce} uniquely identifies a coord-request)
-    field :request_timers, %{required({any(), Nonce.t()}) => reference()}
-
     # hash ring
     field :ring, ExHashRing.HashRing.t()
 
@@ -152,7 +146,6 @@ defmodule DynamoNode do
       id: id,
       store: store,
       nodes_alive: nodes_alive,
-      request_timers: %{},
       ring: ring,
       n: n,
       r: r,
@@ -323,16 +316,17 @@ defmodule DynamoNode do
     cond do
       coord != nil ->
         # redirect to coordinator
-        state =
-          send_with_async_timeout(
-            state,
-            coord,
-            %RedirectedClientRequest{
-              client: client,
-              request: received_msg
-            },
-            {:redirect_timeout, nonce, coord}
-          )
+        send_with_async_timeout(
+          state,
+          coord,
+          %RedirectedClientRequest{
+            client: client,
+            request: received_msg
+          },
+          {:redirect_timeout, nonce, coord}
+        )
+
+        state
 
       coord == nil ->
         # no valid coordinator, reply failure
@@ -675,18 +669,13 @@ defmodule DynamoNode do
         nonce: nonce,
         key: key
       }) do
-    # since send_with_async_timeout modifies state,
-    # we need to reduce over the list of nodes while calling it
-    # to get the final state
-    state =
-      Enum.reduce(get_alive_preference_list(state, key), state, fn node,
-                                                                   state_acc ->
-        # DO send get request to self
-        send_with_async_timeout(state_acc, node, %CoordinatorRequest.Get{
-          nonce: nonce,
-          key: key
-        })
-      end)
+    Enum.each(get_alive_preference_list(state, key), fn node ->
+      # DO send get request to self
+      send_with_async_timeout(state, node, %CoordinatorRequest.Get{
+        nonce: nonce,
+        key: key
+      })
+    end)
 
     # start timer for the responses
     timer(state.coordinator_timeout, {:coordinator_timeout, :get, nonce})
@@ -797,18 +786,17 @@ defmodule DynamoNode do
     # write to own store
     state = put(state, key, [value], context)
 
-    state =
-      get_alive_preference_list_with_intended(state, key)
-      # don't send put request to self
-      |> Enum.reject(fn {node, _hint} -> node == state.id end)
-      |> Enum.reduce(state, fn {node, hint}, state_acc ->
-        send_with_async_timeout(state_acc, node, %CoordinatorRequest.Put{
-          nonce: nonce,
-          key: key,
-          value: value,
-          context: %{context | hint: hint}
-        })
-      end)
+    get_alive_preference_list_with_intended(state, key)
+    # don't send put request to self
+    |> Enum.reject(fn {node, _hint} -> node == state.id end)
+    |> Enum.each(fn {node, hint} ->
+      send_with_async_timeout(state, node, %CoordinatorRequest.Put{
+        nonce: nonce,
+        key: key,
+        value: value,
+        context: %{context | hint: hint}
+      })
+    end)
 
     if state.w <= 1 do
       # we've already written once, so this is enough
@@ -960,7 +948,6 @@ defmodule DynamoNode do
       store: state.store,
       nodes_alive:
         Map.new(state.nodes_alive, fn {node, _alive} -> {node, true} end),
-      request_timers: %{},
       ring: state.ring,
       n: state.n,
       r: state.r,
@@ -982,34 +969,18 @@ defmodule DynamoNode do
 
   @doc """
   Send msg to proc. Also start a timer to inform us to retry.
-
-  This timer is set in state.request_timers, and should be
-  cancelled if a message is received from proc.
-
-  Doesn't reset timer if it already exists.
   """
   def send_with_async_timeout(state, node, msg, _timeout_msg)
       when state.id == node do
-    # since we deal with the weird situation where we might
-    # end up sending messages to ourself (see: `coord_handle_get_req`),
-    # checking that we're not keeping track of our own liveness status
-    # should help us keep some small measure of sanity
+    # don't start a timer for ourselves, since we'll always receive it
     send(node, msg)
-    state
   end
 
-  @spec send_with_async_timeout(%DynamoNode{}, any(), Nonce.t(), any(), any()) ::
-          %DynamoNode{}
-  def send_with_async_timeout(state, node, nonce, msg, timeout_msg) do
+  @spec send_with_async_timeout(%DynamoNode{}, any(), any(), any()) ::
+          :ok
+  def send_with_async_timeout(state, node, msg, timeout_msg) do
+    timer(state.request_timeout, timeout_msg)
     send(node, msg)
-
-    %{
-      state
-      | request_timers:
-          Map.put_new_lazy(state.request_timers, {node, nonce}, fn ->
-            timer(state.request_timeout, timeout_msg)
-          end)
-    }
   end
 
   @doc """
@@ -1025,9 +996,6 @@ defmodule DynamoNode do
 
   @doc """
   Mark a node alive, and do pending operations related to them (handoff).
-
-  We do this by setting its entry in state.nodes_alive to true
-  and by resetting and removing its liveness timer (if it has one).
   """
   def mark_alive(state, node) when state.id == node do
     # since we deal with the weird situation where we might
@@ -1039,16 +1007,9 @@ defmodule DynamoNode do
 
   @spec mark_alive(%DynamoNode{}, any()) :: %DynamoNode{}
   def mark_alive(state, node) do
-    {node_timer, new_request_timers} = Map.pop(state.request_timers, node)
-
-    if node_timer != nil do
-      cancel_timer(node_timer)
-    end
-
     state = %{
       state
-      | nodes_alive: Map.replace!(state.nodes_alive, node, true),
-        request_timers: new_request_timers
+      | nodes_alive: Map.replace!(state.nodes_alive, node, true)
     }
 
     # do pending operations for this node
@@ -1070,14 +1031,13 @@ defmodule DynamoNode do
         context.hint == node
       end)
 
-    state =
-      Enum.reduce(handoff_data, state, fn {key, {values, context}}, state_acc ->
-        send_with_async_timeout(state_acc, node, %HandoffRequest{
-          key: key,
-          values: values,
-          context: context
-        })
-      end)
+    Enum.each(handoff_data, fn {key, {values, context}} ->
+      send_with_async_timeout(state, node, %HandoffRequest{
+        key: key,
+        values: values,
+        context: context
+      })
+    end)
 
     state
   end
