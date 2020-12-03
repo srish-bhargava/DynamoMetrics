@@ -33,7 +33,7 @@ defmodule Cluster do
         r,
         w,
         coordinator_timeout,
-        redirect_timeout,
+        total_redirect_timeout,
         request_timeout,
         alive_check_interval
       ) do
@@ -47,7 +47,7 @@ defmodule Cluster do
           r,
           w,
           coordinator_timeout,
-          redirect_timeout,
+          total_redirect_timeout,
           request_timeout,
           alive_check_interval
         )

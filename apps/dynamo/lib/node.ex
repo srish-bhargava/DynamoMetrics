@@ -43,9 +43,10 @@ defmodule DynamoNode do
     # should wait before failing a client request
     field :coordinator_timeout, pos_integer()
 
-    # Number of milliseconds for which a node should try
-    # to redirect to a client request before failing it
-    field :redirect_timeout, pos_integer()
+    # Total number of milliseconds for which a node should
+    # keep trying to redirect a client request before
+    # failing the client request
+    field :total_redirect_timeout, pos_integer()
 
     # Number of milliseconds a node should wait for
     # a response from another node
@@ -116,7 +117,7 @@ defmodule DynamoNode do
         r,
         w,
         coordinator_timeout,
-        redirect_timeout,
+        total_redirect_timeout,
         request_timeout,
         alive_check_interval
       ) do
@@ -151,7 +152,7 @@ defmodule DynamoNode do
       r: r,
       w: w,
       coordinator_timeout: coordinator_timeout,
-      redirect_timeout: redirect_timeout,
+      total_redirect_timeout: total_redirect_timeout,
       request_timeout: request_timeout,
       alive_check_interval: alive_check_interval,
       pending_gets: %{},
@@ -278,7 +279,7 @@ defmodule DynamoNode do
     else
       # start a timer so we know to stop retrying redirects
       timer(
-        state.redirect_timeout,
+        state.total_redirect_timeout,
         {:total_redirect_timeout, msg.nonce}
       )
 
@@ -953,7 +954,7 @@ defmodule DynamoNode do
       r: state.r,
       w: state.w,
       coordinator_timeout: state.coordinator_timeout,
-      redirect_timeout: state.redirect_timeout,
+      total_redirect_timeout: state.total_redirect_timeout,
       request_timeout: state.request_timeout,
       alive_check_interval: state.alive_check_interval,
       pending_gets: %{},
