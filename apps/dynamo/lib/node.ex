@@ -641,6 +641,10 @@ defmodule DynamoNode do
         })
 
         listener(state)
+
+      # error
+      unhandled_msg ->
+        raise "Received unhandled msg: #{inspect(unhandled_msg)}"
     end
   end
 
