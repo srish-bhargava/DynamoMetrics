@@ -84,6 +84,8 @@ defmodule DynamoNode do
       }
     }
 
+    # pending client requests we're trying to redirect
+    # to an appropriate coordinator
     field :pending_redirects, %{
       required(Nonce.t()) => %{
         client: any(),
