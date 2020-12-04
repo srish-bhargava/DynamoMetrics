@@ -63,10 +63,14 @@ defmodule DynamoNode do
     # This helps distinguish this case with the case when an enough
     # responses have already been received and client_nonce purged
     # from this map.
+    # We also store which nodes we've requested, so that we can avoid these
+    # when we retry.
     field :pending_gets, %{
       required(Nonce.t()) => %{
         client: any(),
-        responses: %{required(any()) => {[any()], %Context{}}}
+        key: key,
+        responses: %{required(any()) => {[any()], %Context{}}},
+        requested: MapSet.t(any())
       }
     }
 
@@ -522,6 +526,7 @@ defmodule DynamoNode do
         listener(state)
 
       # timeouts
+      # client request timeouts at coordinator
       {:coordinator_timeout, :get, nonce} = msg ->
         Logger.info("Received #{inspect(msg)}")
         req_state = Map.get(state.pending_gets, nonce)
@@ -565,6 +570,70 @@ defmodule DynamoNode do
             state
             | pending_puts: Map.delete(state.pending_puts, nonce)
           })
+        end
+
+      # coord-request timeouts
+      {:coordinator_request_timeout, :get, nonce, node} = msg ->
+        Logger.info("Received #{inspect(msg)}")
+
+        req_state = Map.get(state.pending_gets, nonce)
+
+        # either the client request has been dealt with, or we've received
+        # a coord-response from this node
+        retry_not_required? =
+          req_state == nil or Map.has_key?(req_state.responses, node)
+
+        if retry_not_required? do
+          # ignore this timeout
+          listener(state)
+        else
+          # otherwise, we didn't get a response for this coord-request in time
+          # so assume node is dead, and try to request someone else
+          state = mark_dead(state, node)
+
+          %{key: key, requested: already_requested} = req_state
+
+          # get first alive node we've not already requested
+          all_nodes_ordered =
+            HashRing.find_nodes(
+              state.ring,
+              key,
+              map_size(state.nodes_alive) + 1
+            )
+
+          new_node =
+            Enum.find(all_nodes_ordered, fn node ->
+              not MapSet.member?(already_requested, node)
+            end)
+
+          if new_node != nil do
+            # request this node
+            send_with_async_timeout(
+              state,
+              new_node,
+              %CoordinatorRequest.Get{
+                nonce: nonce,
+                key: key
+              },
+              {:coordinator_request_timeout, :get, nonce, new_node}
+            )
+
+            # update state accordingly
+            new_req_state = %{
+              req_state
+              | requested: MapSet.put(already_requested, new_node)
+            }
+
+            state = %{
+              state
+              | pending_gets: Map.put(state.pending_gets, nonce, new_req_state)
+            }
+
+            listener(state)
+          else
+            # nobody else we can request, so don't retry
+            listener(state)
+          end
         end
 
       # redirect timeouts
@@ -672,12 +741,19 @@ defmodule DynamoNode do
         nonce: nonce,
         key: key
       }) do
-    Enum.each(get_alive_preference_list(state, key), fn node ->
+    alive_pref_list = get_alive_preference_list(state, key)
+
+    Enum.each(alive_pref_list, fn node ->
       # DO send get request to self
-      send_with_async_timeout(state, node, %CoordinatorRequest.Get{
-        nonce: nonce,
-        key: key
-      })
+      send_with_async_timeout(
+        state,
+        node,
+        %CoordinatorRequest.Get{
+          nonce: nonce,
+          key: key
+        },
+        {:coordinator_request_timeout, :get, nonce, node}
+      )
     end)
 
     # start timer for the responses
@@ -686,7 +762,12 @@ defmodule DynamoNode do
     %{
       state
       | pending_gets:
-          Map.put(state.pending_gets, nonce, %{client: client, responses: %{}})
+          Map.put(state.pending_gets, nonce, %{
+            client: client,
+            key: key,
+            responses: %{},
+            requested: MapSet.new(alive_pref_list)
+          })
     }
   end
 
