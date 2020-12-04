@@ -97,6 +97,13 @@ defmodule DynamoNode do
         get_or_put: :get | :put
       }
     }
+
+    # what keys have we handed off, and which contexts
+    field :pending_handoffs, %{
+      required(Nonce.t()) => %{
+        required(any()) => %Context{}
+      }
+    }
   end
 
   @doc """
@@ -163,7 +170,8 @@ defmodule DynamoNode do
       alive_check_interval: alive_check_interval,
       pending_gets: %{},
       pending_puts: %{},
-      pending_redirects: %{}
+      pending_redirects: %{},
+      pending_handoffs: %{}
     }
 
     timer(state.alive_check_interval, :alive_check_interval)
@@ -488,41 +496,24 @@ defmodule DynamoNode do
       # handoffs
       {node,
        %HandoffRequest{
-         key: key,
-         values: values,
-         context: context
+         nonce: nonce,
+         data: data
        } = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
         state = mark_alive(state, node)
-        state = put(state, key, values, context)
+        state = put_all(state, data)
 
         # send acknowledgement
-        send(node, %HandoffResponse{key: key, context: context})
+        send(node, %HandoffResponse{nonce: nonce})
 
         listener(state)
 
-      {node, %HandoffResponse{key: key, context: context} = msg} ->
+      {node, %HandoffResponse{nonce: nonce} = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
         state = mark_alive(state, node)
-
-        stored = Map.get(state.store, key)
-
-        state =
-          case stored do
-            nil ->
-              state
-
-            {_values, stored_context} ->
-              if Context.compare(stored_context, context) == :after do
-                # we have newer context to hand off, so don't get rid of key
-                state
-              else
-                # we have handed off this key successfully and we don't
-                # have newer version - get rid of the key
-                %{state | store: Map.delete(state.store, key)}
-              end
-          end
-
+        {keys, new_pending_handoffs} = Map.pop!(state.pending_handoffs, nonce)
+        state = %{state | pending_handoffs: new_pending_handoffs}
+        state = delete_handed_off_keys(state, keys)
         listener(state)
 
       # timeouts
@@ -673,12 +664,26 @@ defmodule DynamoNode do
         end
 
       # handoff timeout
-      {:handoff_timeout, node} = msg ->
+      {:handoff_timeout, nonce, node} = msg ->
         # consider node dead, we'll retry handoff later
         # when it comes alive
         Logger.info("Received #{inspect(msg)}")
-        state = mark_dead(state, node)
-        listener(state)
+
+        if Map.has_key?(state.pending_handoffs, nonce) do
+          # didn't receive response before this timeout
+          # so mark node dead, and remove this from pending
+          state = mark_dead(state, node)
+
+          state = %{
+            state
+            | pending_handoffs: Map.delete(state.pending_handoffs, nonce)
+          }
+
+          listener(state)
+        else
+          # already handed off, so ignore
+          listener(state)
+        end
 
       # health checks
       :alive_check_interval = msg ->
@@ -988,6 +993,46 @@ defmodule DynamoNode do
   end
 
   @doc """
+  Add all `key`-`value` association to local storage.
+  """
+  @spec put_all(%DynamoNode{}, %{required(any()) => {[any()], %Context{}}}) ::
+          %DynamoNode{}
+  def put_all(state, data) do
+    Enum.reduce(data, state, fn {key, {values, context}}, state_acc ->
+      put(state_acc, key, values, context)
+    end)
+  end
+
+  @spec delete_handed_off_key(%DynamoNode{}, any(), %Context{}) ::
+          %DynamoNode{}
+  def delete_handed_off_key(state, key, handed_off_context) do
+    stored = Map.get(state.store, key)
+
+    case stored do
+      nil ->
+        state
+
+      {_values, stored_context} ->
+        if Context.compare(stored_context, handed_off_context) == :after do
+          # we have newer context to hand off, so don't get rid of key
+          state
+        else
+          # we have handed off this key successfully and we don't
+          # have newer version - get rid of the key
+          %{state | store: Map.delete(state.store, key)}
+        end
+    end
+  end
+
+  @spec delete_handed_off_keys(%DynamoNode{}, %{required(any()) => %Context{}}) ::
+          %DynamoNode{}
+  def delete_handed_off_keys(state, keys) do
+    Enum.reduce(keys, state, fn {key, context}, state_acc ->
+      delete_handed_off_key(state_acc, key, context)
+    end)
+  end
+
+  @doc """
   Utility function to remove outdated values from a list of {value, clock} pairs.
   """
   @spec merge_values({[any()], %Context{}}, {[any()], %Context{}}) ::
@@ -1043,7 +1088,8 @@ defmodule DynamoNode do
       alive_check_interval: state.alive_check_interval,
       pending_gets: %{},
       pending_puts: %{},
-      pending_redirects: %{}
+      pending_redirects: %{},
+      pending_handoffs: %{}
     }
 
     crash_wait_loop()
@@ -1116,19 +1162,22 @@ defmodule DynamoNode do
         context.hint == node
       end)
 
-    Enum.each(handoff_data, fn {key, {values, context}} ->
-      send_with_async_timeout(
-        state,
-        node,
-        %HandoffRequest{
-          key: key,
-          values: values,
-          context: context
-        },
-        {:handoff_timeout, node}
-      )
-    end)
+    nonce = Nonce.new()
 
-    state
+    send_with_async_timeout(
+      state,
+      node,
+      %HandoffRequest{
+        nonce: nonce,
+        data: handoff_data
+      },
+      {:handoff_timeout, nonce, node}
+    )
+
+    # make this request pending in state
+    %{
+      state
+      | pending_handoffs: Map.put(state.pending_handoffs, nonce, %{})
+    }
   end
 end
