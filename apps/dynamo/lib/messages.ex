@@ -160,9 +160,8 @@ defmodule HandoffRequest do
     @typedoc """
     Handoff hinted data to original owner.
     """
-    field :key, any()
-    field :values, [any()]
-    field :context, %Context{}
+    field :nonce, Nonce.t()
+    field :data, %{required(any()) => {[any()], %Context{}}}
   end
 end
 
@@ -173,8 +172,7 @@ defmodule HandoffResponse do
     @typedoc """
     Handoff acknowledgement.
     """
-    field :key, any()
-    field :context, %Context{}
+    field :nonce, Nonce.t()
   end
 end
 
