@@ -672,6 +672,14 @@ defmodule DynamoNode do
           listener(state)
         end
 
+      # handoff timeout
+      {:handoff_timeout, node} = msg ->
+        # consider node dead, we'll retry handoff later
+        # when it comes alive
+        Logger.info("Received #{inspect(msg)}")
+        state = mark_dead(state, node)
+        listener(state)
+
       # health checks
       :alive_check_interval = msg ->
         # time to check on dead nodes' health
@@ -1109,11 +1117,16 @@ defmodule DynamoNode do
       end)
 
     Enum.each(handoff_data, fn {key, {values, context}} ->
-      send_with_async_timeout(state, node, %HandoffRequest{
-        key: key,
-        values: values,
-        context: context
-      })
+      send_with_async_timeout(
+        state,
+        node,
+        %HandoffRequest{
+          key: key,
+          values: values,
+          context: context
+        },
+        {:handoff_timeout, node}
+      )
     end)
 
     state
