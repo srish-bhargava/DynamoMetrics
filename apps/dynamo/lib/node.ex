@@ -729,11 +729,6 @@ defmodule DynamoNode do
   2. Wait for r responses.
   3. Return all latest concurrent versions of the key's values
        received.
-
-  TODO Why not handle this in the same way as put's -
-       i.e. read from own store and wait for `r - 1` responses
-
-  TODO Return failure to client on a timeout?
   """
   @spec coord_handle_get_req(%DynamoNode{}, any(), %ClientRequest.Get{}) ::
           %DynamoNode{}
@@ -854,8 +849,6 @@ defmodule DynamoNode do
   4. Wait for responses.
   5. If (w - 1) responses received, return success,
        otherwise failure.
-
-  TODO Return failure to client on a timeout?
   """
   @spec coord_handle_put_req(%DynamoNode{}, any(), %ClientRequest.Put{}) ::
           %DynamoNode{}
