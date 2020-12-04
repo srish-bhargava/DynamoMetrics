@@ -8,7 +8,7 @@ defmodule DynamoNode do
   alias ExHashRing.HashRing
 
   # override Kernel's functions with Emulation's
-  import Emulation, only: [send: 2, timer: 2, cancel_timer: 1]
+  import Emulation, only: [send: 2, timer: 2]
 
   import Kernel,
     except: [spawn: 3, spawn: 1, spawn_link: 1, spawn_link: 3, send: 2]
@@ -68,7 +68,7 @@ defmodule DynamoNode do
     field :pending_gets, %{
       required(Nonce.t()) => %{
         client: any(),
-        key: key,
+        key: any(),
         responses: %{required(any()) => {[any()], %Context{}}},
         requested: MapSet.t(any())
       }
@@ -350,7 +350,7 @@ defmodule DynamoNode do
         # client request taken care of, no need to redirect anymore
         %{
           state
-          | pending_redirects: Map.delete!(state.pending_redirects, nonce)
+          | pending_redirects: Map.delete(state.pending_redirects, nonce)
         }
     end
   end
@@ -880,12 +880,17 @@ defmodule DynamoNode do
     # don't send put request to self
     |> Enum.reject(fn {node, _hint} -> node == state.id end)
     |> Enum.each(fn {node, hint} ->
-      send_with_async_timeout(state, node, %CoordinatorRequest.Put{
-        nonce: nonce,
-        key: key,
-        value: value,
-        context: %{context | hint: hint}
-      })
+      send_with_async_timeout(
+        state,
+        node,
+        %CoordinatorRequest.Put{
+          nonce: nonce,
+          key: key,
+          value: value,
+          context: %{context | hint: hint}
+        },
+        raise("TODO")
+      )
     end)
 
     if state.w <= 1 do
