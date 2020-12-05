@@ -426,7 +426,7 @@ defmodule DynamoNode do
         # request has been handler (in case we were trying to redirect it)
         state = %{
           state
-          | pending_redirects: Map.delete!(state.pending_redirects, nonce)
+          | pending_redirects: Map.delete(state.pending_redirects, nonce)
         }
 
         state = mark_alive(state, coordinator)
@@ -461,7 +461,7 @@ defmodule DynamoNode do
         # request has been handler (in case we were trying to redirect it)
         state = %{
           state
-          | pending_redirects: Map.delete!(state.pending_redirects, nonce)
+          | pending_redirects: Map.delete(state.pending_redirects, nonce)
         }
 
         state = mark_alive(state, coordinator)
