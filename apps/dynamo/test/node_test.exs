@@ -643,7 +643,6 @@ defmodule DynamoNodeTest do
         nodes_alive: Map.delete(nodes_alive, node),
         # -- unused --
         store: nil,
-        request_timers: nil,
         r: nil,
         w: nil,
         coordinator_timeout: nil,
@@ -651,7 +650,9 @@ defmodule DynamoNodeTest do
         request_timeout: nil,
         alive_check_interval: nil,
         pending_gets: nil,
-        pending_puts: nil
+        pending_puts: nil,
+        pending_redirects: nil,
+        pending_handoffs: nil
       }
 
       assert DynamoNode.get_preference_list(state, key) ==
@@ -675,7 +676,6 @@ defmodule DynamoNodeTest do
         nodes_alive: Map.delete(nodes_alive, node),
         # -- unused --
         store: nil,
-        request_timers: nil,
         r: nil,
         w: nil,
         coordinator_timeout: nil,
@@ -683,7 +683,9 @@ defmodule DynamoNodeTest do
         request_timeout: nil,
         alive_check_interval: nil,
         pending_gets: nil,
-        pending_puts: nil
+        pending_puts: nil,
+        pending_redirects: nil,
+        pending_handoffs: nil
       }
 
       DynamoNode.get_alive_preference_list(state, key)
@@ -710,7 +712,6 @@ defmodule DynamoNodeTest do
         nodes_alive: Map.delete(nodes_alive, node),
         # -- unused --
         store: nil,
-        request_timers: nil,
         r: nil,
         w: nil,
         coordinator_timeout: nil,
@@ -718,7 +719,9 @@ defmodule DynamoNodeTest do
         request_timeout: nil,
         alive_check_interval: nil,
         pending_gets: nil,
-        pending_puts: nil
+        pending_puts: nil,
+        pending_redirects: nil,
+        pending_handoffs: nil
       }
 
       alive_pref_list = DynamoNode.get_alive_preference_list(state, key)
