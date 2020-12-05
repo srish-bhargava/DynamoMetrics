@@ -834,4 +834,59 @@ defmodule DynamoNodeTest do
         assert values == [500], "Wrong value"
     end
   end
+
+  test "Put request succeeds even with a lot of crashed nodes in pref list" do
+    nodes = [:a, :b, :c, :d, :e, :f]
+    n = 4
+    w = 4
+    Cluster.start(%{foo: 42}, nodes, n, 1, w, 1000, 9999, 200, 9999, 9999)
+
+    # figure out pref list
+    pref_list = HashRing.find_nodes(HashRing.new(nodes, 1), :foo, 4)
+    Logger.debug("preference list: #{inspect(pref_list)}")
+    [pref_1, pref_2, pref_3, _pref_4] = pref_list
+
+    # crash 2 nodes in pref list
+    for node <- [pref_2, pref_3] do
+      send(node, :crash)
+    end
+
+    nonce = Nonce.new()
+    send(pref_1, %ClientRequest.Put{nonce: nonce, key: :foo, value: 49, context: new_context()})
+
+    assert_receive %ClientResponse.Put{nonce: ^nonce, success: true, context: _context}, 1200
+  end
+
+  test "Coordinator figures out who's alive after put request" do
+    nodes = [:a, :b, :c, :d, :e, :f]
+    n = 4
+    w = 4
+    Cluster.start(%{foo: 42}, nodes, n, 1, w, 1000, 9999, 200, 9999, 9999)
+
+    # figure out pref list
+    pref_list = HashRing.find_nodes(HashRing.new(nodes, 1), :foo, 4)
+    Logger.debug("preference list: #{inspect(pref_list)}")
+    [pref_1, pref_2, pref_3, _pref_4] = pref_list
+
+    # crash 2 nodes in pref list
+    for node <- [pref_2, pref_3] do
+      send(node, :crash)
+    end
+
+    nonce = Nonce.new()
+    send(pref_1, %ClientRequest.Put{nonce: nonce, key: :foo, value: 49, context: new_context()})
+
+    wait(1200)
+
+    send(pref_1, %TestRequest{nonce: Nonce.new()})
+    assert_receive %TestResponse{nonce: _nonce, state: pref_1_state}
+
+    expected_nodes_alive =
+      Map.new(nodes, fn node -> {node, true} end)
+      |> Map.delete(pref_1)
+      |> Map.put(pref_2, false)
+      |> Map.put(pref_3, false)
+
+    assert pref_1_state.nodes_alive == expected_nodes_alive
+  end
 end

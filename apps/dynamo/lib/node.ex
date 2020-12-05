@@ -652,7 +652,7 @@ defmodule DynamoNode do
         # either the client request has been dealt with, or we've received
         # a coord-response from this node
         retry_not_required? =
-          req_state == nil or Map.has_key?(req_state.responses, node)
+          req_state == nil or MapSet.member?(req_state.responses, node)
 
         if retry_not_required? do
           # ignore this timeout
