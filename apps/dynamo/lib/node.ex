@@ -594,7 +594,8 @@ defmodule DynamoNode do
 
           new_node =
             Enum.find(all_nodes_ordered, fn node ->
-              not MapSet.member?(already_requested, node)
+              not MapSet.member?(already_requested, node) and
+                (node == state.id or Map.get(state.nodes_alive, node) == true)
             end)
 
           if new_node != nil do
