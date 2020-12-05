@@ -1128,7 +1128,7 @@ defmodule DynamoNode do
   end
 
   def mark_dead(state, node) do
-    Map.replace!(state.nodes_alive, node, false)
+    %{state | nodes_alive: Map.replace!(state.nodes_alive, node, false)}
   end
 
   @doc """
