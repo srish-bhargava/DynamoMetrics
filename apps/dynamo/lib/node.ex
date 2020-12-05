@@ -442,19 +442,21 @@ defmodule DynamoNode do
 
         stored = Map.get(state.store, key)
 
-        case stored do
+        {resp_values, resp_context} = case stored do
           {values, context} ->
-            send(coordinator, %CoordinatorResponse.Get{
-              nonce: nonce,
-              values: values,
-              # remove the hint, so it doesn't get stored somewhere
-              # else as well
-              context: %{context | hint: nil}
-            })
+            {values, context}
 
           nil ->
-            Logger.debug("Don't have key #{inspect(key)}, so not responding")
+            {[], %Context{version: VectorClock.new()}}
         end
+
+        send(coordinator, %CoordinatorResponse.Get{
+          nonce: nonce,
+          values: resp_values,
+          # remove the hint, so it doesn't get stored somewhere
+          # else as well
+          context: %{resp_context | hint: nil}
+        })
 
         listener(state)
 
