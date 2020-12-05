@@ -511,10 +511,16 @@ defmodule DynamoNode do
       {node, %HandoffResponse{nonce: nonce} = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
         state = mark_alive(state, node)
-        {keys, new_pending_handoffs} = Map.pop!(state.pending_handoffs, nonce)
-        state = %{state | pending_handoffs: new_pending_handoffs}
-        state = delete_handed_off_keys(state, keys)
-        listener(state)
+
+        if not Map.has_key?(state.pending_handoffs, nonce) do
+          # this handoff timed out already, so ignore this response
+          listener(state)
+        else
+          {keys, new_pending_handoffs} = Map.pop!(state.pending_handoffs, nonce)
+          state = %{state | pending_handoffs: new_pending_handoffs}
+          state = delete_handed_off_keys(state, keys)
+          listener(state)
+        end
 
       # timeouts
       # client request timeouts at coordinator
