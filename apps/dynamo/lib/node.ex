@@ -643,7 +643,7 @@ defmodule DynamoNode do
 
             state = %{
               state
-              | pending_redirects: Map.delete!(state.pending_redirects, nonce)
+              | pending_redirects: Map.delete(state.pending_redirects, nonce)
             }
 
             listener(state)
