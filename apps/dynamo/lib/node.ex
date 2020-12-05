@@ -638,91 +638,99 @@ defmodule DynamoNode do
           end
         end
 
-        #coord-request timeouts for put
-        {:coordinator_request_timeout, :put, nonce, node} = msg ->
-          Logger.info("Received #{inspect(msg)}")
+      # coord-request timeouts for put
+      {:coordinator_request_timeout, :put, nonce, node} = msg ->
+        Logger.info("Received #{inspect(msg)}")
 
-          req_state = Map.get(state.pending_puts, nonce)
+        req_state = Map.get(state.pending_puts, nonce)
 
-          # either the client request has been dealt with, or we've received
-          # a coord-response from this node
-          retry_not_required? =
-            req_state == nil or Map.has_key?(req_state.responses, node)
+        # either the client request has been dealt with, or we've received
+        # a coord-response from this node
+        retry_not_required? =
+          req_state == nil or Map.has_key?(req_state.responses, node)
 
-          if retry_not_required? do
-            # ignore this timeout
-            listener(state)
-          else
-            # otherwise, we didn't get a response for this coord-request in time
-            # so assume node is dead, and try to request someone else
-            state = mark_dead(state, node)
+        if retry_not_required? do
+          # ignore this timeout
+          listener(state)
+        else
+          # otherwise, we didn't get a response for this coord-request in time
+          # so assume node is dead, and try to request someone else
+          state = mark_dead(state, node)
 
-            %{key: key,
-              value: value,
-              context: context,
-              requested: already_requested,
-              last_requested_index: last_requested_index} = req_state
+          %{
+            key: key,
+            value: value,
+            context: context,
+            requested: already_requested,
+            last_requested_index: last_requested_index
+          } = req_state
 
-            # get first alive node we've not already requested
-            all_nodes_ordered =
-              HashRing.find_nodes(
-                state.ring,
-                key,
-                map_size(state.nodes_alive) + 1
-              )
+          # get first alive node we've not already requested
+          all_nodes_ordered =
+            HashRing.find_nodes(
+              state.ring,
+              key,
+              map_size(state.nodes_alive) + 1
+            )
 
-            # requested nodes: 0 1 3 5
-            # all_nodes_ordered: (0 1 2 3x) 4 5 6 7 ...
-            unrequested_nodes_ordered = Enum.drop(all_nodes_ordered, last_requested_index + 1)
+          # requested nodes: 0 1 3 5
+          # all_nodes_ordered: (0 1 2 3x) 4 5 6 7 ...
+          unrequested_nodes_ordered =
+            Enum.drop(all_nodes_ordered, last_requested_index + 1)
 
-            new_node =
-              Enum.find(unrequested_nodes_ordered, fn node ->
-                node == state.id or Map.get(state.nodes_alive, node) == true
-              end)
+          new_node =
+            Enum.find(unrequested_nodes_ordered, fn node ->
+              node == state.id or Map.get(state.nodes_alive, node) == true
+            end)
 
-            new_hint = case Map.get(already_requested, node) do
+          new_hint =
+            case Map.get(already_requested, node) do
               nil ->
                 # Since no hint, then timed out node *must* be in preference list
                 # so the hint should be for this node
                 node
 
               orig_hint ->
-                 # we transfer the hint to the new request
-                 orig_hint
+                # we transfer the hint to the new request
+                orig_hint
             end
 
-            if new_node != nil do
-              # request this node
-              send_with_async_timeout(
-                state,
-                new_node,
-                %CoordinatorRequest.Put{
-                  nonce: nonce,
-                  key: key,
-                  value: value,
-                  context: %{context | hint: new_hint}
-                },
-                {:coordinator_request_timeout, :put, nonce, new_node}
-              )
+          if new_node != nil do
+            # request this node
+            send_with_async_timeout(
+              state,
+              new_node,
+              %CoordinatorRequest.Put{
+                nonce: nonce,
+                key: key,
+                value: value,
+                context: %{context | hint: new_hint}
+              },
+              {:coordinator_request_timeout, :put, nonce, new_node}
+            )
 
-              # update state accordingly
-              new_req_state = %{
-                req_state
-                | requested: Map.put(already_requested, new_node, new_hint),
-                  last_requested: max(req_state.last_requested, Enum.find_index(all_nodes_ordered, &(&1 == new_node)))
-              }
+            # update state accordingly
+            new_req_state = %{
+              req_state
+              | requested: Map.put(already_requested, new_node, new_hint),
+                last_requested_index:
+                  max(
+                    req_state.last_requested_index,
+                    Enum.find_index(all_nodes_ordered, &(&1 == new_node))
+                  )
+            }
 
-              state = %{
-                state
-                | pending_puts: Map.put(state.pending_puts, nonce, new_req_state)
-              }
+            state = %{
+              state
+              | pending_puts: Map.put(state.pending_puts, nonce, new_req_state)
+            }
 
-              listener(state)
-            else
-              # nobody else we can request, so don't retry
-              listener(state)
-            end
+            listener(state)
+          else
+            # nobody else we can request, so don't retry
+            listener(state)
           end
+        end
 
       # redirect timeouts
       {:total_redirect_timeout, nonce} = msg ->
@@ -975,8 +983,8 @@ defmodule DynamoNode do
 
     # don't send put request to self
     to_request =
-       get_alive_preference_list_with_intended(state, key)
-       |> Enum.reject(fn {node, _hint} -> node == state.id end)
+      get_alive_preference_list_with_intended(state, key)
+      |> Enum.reject(fn {node, _hint} -> node == state.id end)
 
     to_request
     |> Enum.each(fn {node, hint} ->
@@ -989,7 +997,7 @@ defmodule DynamoNode do
           value: value,
           context: %{context | hint: hint}
         },
-        {:coordinator_request_timeout, :put, node, nonce}
+        {:coordinator_request_timeout, :put, nonce, node}
       )
     end)
 
@@ -1005,14 +1013,19 @@ defmodule DynamoNode do
       state
     else
       # otherwise, start timer for the responses and mark pending
-      timer(state.coordinator_timeout, {:total_coordinator_timeout, :put, nonce})
+      timer(
+        state.coordinator_timeout,
+        {:total_coordinator_timeout, :put, nonce}
+      )
 
       all_nodes_ordered =
         HashRing.find_nodes(state.ring, key, map_size(state.nodes_alive) + 1)
 
       last_requested_index =
         to_request
-        |> Enum.map(fn {node, _hint} -> Enum.find_index(all_nodes_ordered, &(&1 == node)) end)
+        |> Enum.map(fn {node, _hint} ->
+          Enum.find_index(all_nodes_ordered, &(&1 == node))
+        end)
         |> Enum.max()
 
       %{
@@ -1021,9 +1034,10 @@ defmodule DynamoNode do
             Map.put(state.pending_puts, nonce, %{
               client: client,
               key: key,
+              value: value,
               context: context,
               responses: MapSet.new(),
-              requested: to_request,
+              requested: Map.new(to_request),
               last_requested_index: last_requested_index
             })
       }
@@ -1043,7 +1057,7 @@ defmodule DynamoNode do
   def coord_handle_put_resp(state, node, %CoordinatorResponse.Put{
         nonce: nonce
       }) do
-    old_req_state = Map.get(state.pending_gets, nonce)
+    old_req_state = Map.get(state.pending_puts, nonce)
 
     new_req_state =
       if old_req_state == nil do
@@ -1064,7 +1078,7 @@ defmodule DynamoNode do
       MapSet.size(new_req_state.responses) >= state.w - 1 ->
         Logger.info(
           "Got w - 1 or more responses for " <>
-            "#{inspect(new_req_state.client)}'s get " <>
+            "#{inspect(new_req_state.client)}'s put " <>
             "request [nonce=#{inspect(nonce)}]"
         )
 
@@ -1238,6 +1252,7 @@ defmodule DynamoNode do
   end
 
   def mark_dead(state, node) do
+    Logger.debug("Marking #{inspect(node)} dead")
     %{state | nodes_alive: Map.replace!(state.nodes_alive, node, false)}
   end
 
@@ -1278,22 +1293,26 @@ defmodule DynamoNode do
         context.hint == node
       end)
 
-    nonce = Nonce.new()
-
-    send_with_async_timeout(
-      state,
-      node,
-      %HandoffRequest{
-        nonce: nonce,
-        data: handoff_data
-      },
-      {:handoff_timeout, nonce, node}
-    )
-
-    # make this request pending in state
-    %{
+    if Enum.empty?(handoff_data) do
       state
-      | pending_handoffs: Map.put(state.pending_handoffs, nonce, %{})
-    }
+    else
+      nonce = Nonce.new()
+
+      send_with_async_timeout(
+        state,
+        node,
+        %HandoffRequest{
+          nonce: nonce,
+          data: handoff_data
+        },
+        {:handoff_timeout, nonce, node}
+      )
+
+      # make this request pending in state
+      %{
+        state
+        | pending_handoffs: Map.put(state.pending_handoffs, nonce, %{})
+      }
+    end
   end
 end
