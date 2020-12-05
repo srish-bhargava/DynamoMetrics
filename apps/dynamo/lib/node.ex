@@ -125,6 +125,7 @@ defmodule DynamoNode do
           pos_integer(),
           pos_integer(),
           pos_integer(),
+          pos_integer(),
           pos_integer()
         ) ::
           no_return()
@@ -138,7 +139,8 @@ defmodule DynamoNode do
         coordinator_timeout,
         total_redirect_timeout,
         request_timeout,
-        alive_check_interval
+        alive_check_interval,
+        replica_sync_timeout
       ) do
     Logger.info("Starting node #{inspect(id)}")
     Logger.metadata(id: id)
@@ -174,8 +176,7 @@ defmodule DynamoNode do
       total_redirect_timeout: total_redirect_timeout,
       request_timeout: request_timeout,
       alive_check_interval: alive_check_interval,
-      # TODO Take a parameter for this
-      replica_sync_timeout: 500,
+      replica_sync_timeout: replica_sync_timeout,
       pending_gets: %{},
       pending_puts: %{},
       pending_redirects: %{},
