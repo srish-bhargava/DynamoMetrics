@@ -864,12 +864,13 @@ defmodule DynamoNodeTest do
     Cluster.start(%{foo: 42}, nodes, n, 1, w, 1000, 9999, 200, 9999, 9999)
 
     # figure out pref list
-    pref_list = HashRing.find_nodes(HashRing.new(nodes, 1), :foo, 4)
+    pref_list = HashRing.find_nodes(HashRing.new(nodes, 1), :foo, Enum.count(nodes))
     Logger.debug("preference list: #{inspect(pref_list)}")
-    [pref_1, pref_2, pref_3, _pref_4] = pref_list
+    [pref_1, pref_2, pref_3, _pref_4, _pref_5, pref_6] = pref_list
 
     # crash 2 nodes in pref list
-    for node <- [pref_2, pref_3] do
+    crash_nodes = [pref_2, pref_3, pref_6]
+    for node <- crash_nodes do
       send(node, :crash)
     end
 
@@ -882,10 +883,8 @@ defmodule DynamoNodeTest do
     assert_receive %TestResponse{nonce: _nonce, state: pref_1_state}
 
     expected_nodes_alive =
-      Map.new(nodes, fn node -> {node, true} end)
+      Map.new(nodes, fn node -> {node, node not in crash_nodes} end)
       |> Map.delete(pref_1)
-      |> Map.put(pref_2, false)
-      |> Map.put(pref_3, false)
 
     assert pref_1_state.nodes_alive == expected_nodes_alive
   end
