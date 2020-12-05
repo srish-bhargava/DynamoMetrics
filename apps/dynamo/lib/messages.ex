@@ -198,3 +198,25 @@ defmodule TestResponse do
     field :state, %DynamoNode{}
   end
 end
+
+defmodule ReplicaSyncRequest do
+  use TypedStruct
+
+  typedstruct enforce: true do
+    @typedoc """
+    Message for requesting replica synchronization.
+    """
+    field :data, %{required(any()) => {[any()], %Context{}}}
+  end
+end
+
+defmodule ReplicaSyncResponse do
+  use TypedStruct
+
+  typedstruct enforce: true do
+    @typedoc """
+    Message for retrieving replica sync request.
+    """
+    field :data, %{required(any()) => {[any()], %Context{}}}
+  end
+end

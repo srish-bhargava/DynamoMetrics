@@ -48,6 +48,8 @@ defmodule DynamoNode do
     # failing the client request
     field :total_redirect_timeout, pos_integer()
 
+    field :replica_sync_timeout, pos_integer()
+
     # Number of milliseconds a node should wait for
     # a response from another node
     field :request_timeout, pos_integer()
@@ -172,6 +174,8 @@ defmodule DynamoNode do
       total_redirect_timeout: total_redirect_timeout,
       request_timeout: request_timeout,
       alive_check_interval: alive_check_interval,
+      # TODO Take a parameter for this
+      replica_sync_timeout: 500,
       pending_gets: %{},
       pending_puts: %{},
       pending_redirects: %{},
@@ -816,6 +820,44 @@ defmodule DynamoNode do
         state = mark_alive(state, node)
         listener(state)
 
+      # replica synchronization
+      :replica_sync_timeout = msg ->
+        Logger.info("Received #{inspect msg}")
+        # time to sync with a random alive node
+        syncing_with =
+          state.nodes_alive
+          |> Enum.filter(fn {_node, alive} -> alive end)
+          |> Enum.random()
+
+        # figure out intersection of keys
+        common_keys =
+          state.store
+          |> Map.keys()
+          |> Enum.filter(fn key -> syncing_with in get_preference_list(state, key) end)
+
+        # send data for these common keys
+        common_data = Map.take(state.store, common_keys)
+        send(syncing_with, %ReplicaSyncRequest{data: common_data})
+
+        listener(state)
+
+      {node, %ReplicaSyncRequest{data: data} = msg} ->
+        Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
+        # put this data in our store
+        state = put_all(state, data)
+
+        # respond with (possibly updated) values of the keys in data
+        resp_data = Map.take(state.store, Map.keys(data))
+        send(node, %ReplicaSyncResponse{data: resp_data})
+
+        listener(state)
+
+      {node, %ReplicaSyncResponse{data: data} = msg} ->
+        Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
+        # put this data in our store
+        state = put_all(state, data)
+        listener(state)
+
       # testing
       {from, %TestRequest{nonce: nonce}} ->
         # respond with our current state
@@ -1216,6 +1258,7 @@ defmodule DynamoNode do
       total_redirect_timeout: state.total_redirect_timeout,
       request_timeout: state.request_timeout,
       alive_check_interval: state.alive_check_interval,
+      replica_sync_timeout: state.replica_sync_timeout,
       pending_gets: %{},
       pending_puts: %{},
       pending_redirects: %{},
