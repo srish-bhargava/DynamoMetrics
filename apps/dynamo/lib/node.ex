@@ -83,8 +83,12 @@ defmodule DynamoNode do
     field :pending_puts, %{
       required(Nonce.t()) => %{
         client: any(),
+        key: any(),
+        value: any(),
         context: %Context{},
-        responses: MapSet.t(any())
+        responses: MapSet.t(any()),
+        requested: %{required(any()) => any() | nil},
+        last_requested_index: non_neg_integer()
       }
     }
 
@@ -524,7 +528,7 @@ defmodule DynamoNode do
 
       # timeouts
       # client request timeouts at coordinator
-      {:coordinator_timeout, :get, nonce} = msg ->
+      {:total_coordinator_timeout, :get, nonce} = msg ->
         Logger.info("Received #{inspect(msg)}")
         req_state = Map.get(state.pending_gets, nonce)
 
@@ -547,7 +551,7 @@ defmodule DynamoNode do
           })
         end
 
-      {:coordinator_timeout, :put, nonce} = msg ->
+      {:total_coordinator_timeout, :put, nonce} = msg ->
         Logger.info("Received #{inspect(msg)}")
         req_state = Map.get(state.pending_puts, nonce)
 
@@ -633,6 +637,92 @@ defmodule DynamoNode do
             listener(state)
           end
         end
+
+        #coord-request timeouts for put
+        {:coordinator_request_timeout, :put, nonce, node} = msg ->
+          Logger.info("Received #{inspect(msg)}")
+
+          req_state = Map.get(state.pending_puts, nonce)
+
+          # either the client request has been dealt with, or we've received
+          # a coord-response from this node
+          retry_not_required? =
+            req_state == nil or Map.has_key?(req_state.responses, node)
+
+          if retry_not_required? do
+            # ignore this timeout
+            listener(state)
+          else
+            # otherwise, we didn't get a response for this coord-request in time
+            # so assume node is dead, and try to request someone else
+            state = mark_dead(state, node)
+
+            %{key: key,
+              value: value,
+              context: context,
+              requested: already_requested,
+              last_requested_index: last_requested_index} = req_state
+
+            # get first alive node we've not already requested
+            all_nodes_ordered =
+              HashRing.find_nodes(
+                state.ring,
+                key,
+                map_size(state.nodes_alive) + 1
+              )
+
+            # requested nodes: 0 1 3 5
+            # all_nodes_ordered: (0 1 2 3x) 4 5 6 7 ...
+            unrequested_nodes_ordered = Enum.drop(all_nodes_ordered, last_requested_index + 1)
+
+            new_node =
+              Enum.find(unrequested_nodes_ordered, fn node ->
+                node == state.id or Map.get(state.nodes_alive, node) == true
+              end)
+
+            new_hint = case Map.get(already_requested, node) do
+              nil ->
+                # Since no hint, then timed out node *must* be in preference list
+                # so the hint should be for this node
+                node
+
+              orig_hint ->
+                 # we transfer the hint to the new request
+                 orig_hint
+            end
+
+            if new_node != nil do
+              # request this node
+              send_with_async_timeout(
+                state,
+                new_node,
+                %CoordinatorRequest.Put{
+                  nonce: nonce,
+                  key: key,
+                  value: value,
+                  context: %{context | hint: new_hint}
+                },
+                {:coordinator_request_timeout, :put, nonce, new_node}
+              )
+
+              # update state accordingly
+              new_req_state = %{
+                req_state
+                | requested: Map.put(already_requested, new_node, new_hint),
+                  last_requested: max(req_state.last_requested, Enum.find_index(all_nodes_ordered, &(&1 == new_node)))
+              }
+
+              state = %{
+                state
+                | pending_puts: Map.put(state.pending_puts, nonce, new_req_state)
+              }
+
+              listener(state)
+            else
+              # nobody else we can request, so don't retry
+              listener(state)
+            end
+          end
 
       # redirect timeouts
       {:total_redirect_timeout, nonce} = msg ->
@@ -772,7 +862,7 @@ defmodule DynamoNode do
     end)
 
     # start timer for the responses
-    timer(state.coordinator_timeout, {:coordinator_timeout, :get, nonce})
+    timer(state.coordinator_timeout, {:total_coordinator_timeout, :get, nonce})
 
     %{
       state
@@ -883,9 +973,12 @@ defmodule DynamoNode do
     # write to own store
     state = put(state, key, [value], context)
 
-    get_alive_preference_list_with_intended(state, key)
     # don't send put request to self
-    |> Enum.reject(fn {node, _hint} -> node == state.id end)
+    to_request =
+       get_alive_preference_list_with_intended(state, key)
+       |> Enum.reject(fn {node, _hint} -> node == state.id end)
+
+    to_request
     |> Enum.each(fn {node, hint} ->
       send_with_async_timeout(
         state,
@@ -896,7 +989,7 @@ defmodule DynamoNode do
           value: value,
           context: %{context | hint: hint}
         },
-        raise("TODO")
+        {:coordinator_request_timeout, :put, node, nonce}
       )
     end)
 
@@ -912,15 +1005,26 @@ defmodule DynamoNode do
       state
     else
       # otherwise, start timer for the responses and mark pending
-      timer(state.coordinator_timeout, {:coordinator_timeout, :put, nonce})
+      timer(state.coordinator_timeout, {:total_coordinator_timeout, :put, nonce})
+
+      all_nodes_ordered =
+        HashRing.find_nodes(state.ring, key, map_size(state.nodes_alive) + 1)
+
+      last_requested_index =
+        to_request
+        |> Enum.map(fn {node, _hint} -> Enum.find_index(all_nodes_ordered, &(&1 == node)) end)
+        |> Enum.max()
 
       %{
         state
         | pending_puts:
             Map.put(state.pending_puts, nonce, %{
               client: client,
+              key: key,
               context: context,
-              responses: MapSet.new()
+              responses: MapSet.new(),
+              requested: to_request,
+              last_requested_index: last_requested_index
             })
       }
     end
