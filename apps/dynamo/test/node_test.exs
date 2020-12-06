@@ -1219,4 +1219,57 @@ defmodule DynamoNodeTest do
 
     assert Map.get(pref_4_state.store, :foo) == nil
   end
+
+  test "Replicas sync after a while" do
+    nodes = [:a, :b, :c, :d]
+    n = 3
+    w = 3
+    Cluster.start(%{foo: 42}, nodes, n, w, w, 9999, 9999, 200, 500, 200)
+
+    pref_list =
+      HashRing.find_nodes(HashRing.new(nodes, 1), :foo, Enum.count(nodes))
+
+    Logger.debug("preference list: #{inspect(pref_list)}")
+
+    [pref_1, pref_2, _pref_3, pref_4] = pref_list
+
+    send(pref_2, :crash)
+
+    # send get request so coordinator knows pref_2 has crashed
+    send(pref_1, %ClientRequest.Get{nonce: Nonce.new(), key: :foo})
+    wait(1000)
+
+    # send put request to establish hinted data at pref_4
+    put_nonce = Nonce.new()
+
+    send(pref_1, %ClientRequest.Put{
+      nonce: put_nonce,
+      key: :foo,
+      value: 49,
+      context: new_context()
+    })
+
+    wait(500)
+
+    # hint should be present at pref_4 by now
+    # now crash it before it can hand off
+    send(pref_4, :crash)
+    wait(200)
+
+    # crashed node now recovers
+    send(pref_2, :recover)
+
+    # other nodes should figure this out after a while due to alive_check_interval
+    wait(500 + 200)
+
+    # after a while, one of pref_1 and pref_3 should sync with pref_2
+    wait(1000)
+
+    # pref_2 should now have been synced
+    test_nonce = Nonce.new()
+    send(pref_2, %TestRequest{nonce: test_nonce})
+    assert_receive %TestResponse{nonce: ^test_nonce, state: pref_2_state}, 500
+
+    assert {[49], _context} = Map.get(pref_2_state.store, :foo)
+  end
 end
