@@ -184,6 +184,7 @@ defmodule DynamoNode do
     }
 
     timer(state.alive_check_interval, :alive_check_interval)
+    timer(state.replica_sync_timeout, :replica_sync_timeout)
 
     listener(state)
   end
@@ -845,6 +846,7 @@ defmodule DynamoNode do
         common_data = Map.take(state.store, common_keys)
         send(syncing_with, %ReplicaSyncRequest{data: common_data})
 
+        timer(state.replica_sync_interval, :replica_sync_interval)
         listener(state)
 
       {node, %ReplicaSyncRequest{data: data} = msg} ->
@@ -1274,6 +1276,7 @@ defmodule DynamoNode do
     crash_wait_loop()
 
     timer(state.alive_check_interval, :alive_check_interval)
+    timer(state.replica_sync_timeout, :replica_sync_timeout)
     wiped_state
   end
 
