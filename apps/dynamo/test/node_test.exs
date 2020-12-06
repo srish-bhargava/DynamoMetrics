@@ -1045,4 +1045,89 @@ defmodule DynamoNodeTest do
 
     assert pref_1_state.nodes_alive == expected_nodes_alive
   end
+
+  test "Get request succeeds when sent to non-coordinator with lots of crashes" do
+    nodes = [:a, :b, :c, :d, :e, :f, :h, :i]
+    n = 4
+    r = 4
+    Cluster.start(%{foo: 42}, nodes, n, r, 1, 1000, 9999, 200, 9999, 9999)
+
+    # figure out pref list
+    pref_list =
+      HashRing.find_nodes(HashRing.new(nodes, 1), :foo, Enum.count(nodes))
+
+    Logger.debug("preference list: #{inspect(pref_list)}")
+
+    [pref_1, pref_2, pref_3, _pref_4, _pref_5, pref_6, _pref_7, _pref_8] =
+      pref_list
+
+    # crash top 3 nodes in pref list
+    crash_nodes = [pref_1, pref_2, pref_3]
+
+    for node <- crash_nodes do
+      send(node, :crash)
+    end
+
+    # send request to a non-coordinator
+    client_nonce = Nonce.new()
+    send(pref_6, %ClientRequest.Get{nonce: client_nonce, key: :foo})
+
+    wait(700)
+
+    # check that pref_4 is the coordinator for this request
+    test_nonce = Nonce.new()
+    send(pref_4, %TestRequest{nonce: test_nonce})
+    assert_receive %TestResponse{nonce: ^test_nonce, state: state}, 200
+    assert Map.has_key?(state.pending_gets, client_nonce)
+
+    wait(1000)
+
+    # check that the request succeeds
+    assert_received %ClientResponse.Get{
+      nonce: ^client_nonce,
+      success: true,
+      values: [42],
+      context: _context
+    }
+  end
+
+  test "Put request succeeds when sent to non-coordinator with lots of crashes" do
+    nodes = [:a, :b, :c, :d, :e, :f, :h, :i]
+    n = 4
+    w = 4
+    Cluster.start(%{foo: 42}, nodes, n, 1, w, 1000, 9999, 200, 9999, 9999)
+
+    # figure out pref list
+    pref_list =
+      HashRing.find_nodes(HashRing.new(nodes, 1), :foo, Enum.count(nodes))
+
+    Logger.debug("preference list: #{inspect(pref_list)}")
+
+    [pref_1, pref_2, pref_3, _pref_4, _pref_5, pref_6, _pref_7, _pref_8] =
+      pref_list
+
+    # crash top 3 nodes in pref list
+    crash_nodes = [pref_1, pref_2, pref_3]
+
+    for node <- crash_nodes do
+      send(node, :crash)
+    end
+
+    # send request to a non-coordinator
+    nonce = Nonce.new()
+
+    send(pref_6, %ClientRequest.Put{
+      nonce: nonce,
+      key: :foo,
+      value: 49,
+      context: new_context()
+    })
+
+    assert_receive %ClientResponse.Put{
+                     nonce: ^nonce,
+                     success: true,
+                     context: _context
+                   },
+                   1200
+  end
 end
