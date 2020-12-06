@@ -1217,6 +1217,6 @@ defmodule DynamoNodeTest do
     send(pref_4, %TestRequest{nonce: test_4_nonce})
     assert_receive %TestResponse{nonce: ^test_4_nonce, state: pref_4_state}, 500
 
-    assert nil = Map.get(pref_4_state.store, :foo)
+    assert Map.get(pref_4_state.store, :foo) == nil
   end
 end
