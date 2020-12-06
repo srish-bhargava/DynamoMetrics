@@ -847,7 +847,9 @@ defmodule DynamoNode do
         Logger.info("Received #{inspect(msg)}")
         # time to sync with a random alive node
         alive_nodes =
-          Enum.filter(state.nodes_alive, fn {_node, alive} -> alive end)
+          for {node, true} <- state.nodes_alive do
+            node
+          end
 
         if not Enum.empty?(alive_nodes) do
           syncing_with = Enum.random(alive_nodes)
