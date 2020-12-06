@@ -1262,8 +1262,8 @@ defmodule DynamoNodeTest do
     # other nodes should figure this out after a while due to alive_check_interval
     wait(500 + 200)
 
-    # after a while, one of pref_1 and pref_3 should sync with pref_2
-    wait(1000)
+    # after a while, one of pref_1 and pref_3 should sync with pref_2 (or vice-versa)
+    wait(600)
 
     # pref_2 should now have been synced
     test_nonce = Nonce.new()
