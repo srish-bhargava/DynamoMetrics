@@ -153,6 +153,17 @@ defmodule RedirectedClientRequest do
   end
 end
 
+defmodule RedirectAcknowledgement do
+  use TypedStruct
+
+  typedstruct enforce: true do
+    @typedoc """
+    Acknowledgement for a redirect.
+    """
+    field :nonce, Nonce.t()
+  end
+end
+
 defmodule HandoffRequest do
   use TypedStruct
 
