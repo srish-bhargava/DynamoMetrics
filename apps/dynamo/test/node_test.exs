@@ -1146,7 +1146,7 @@ defmodule DynamoNodeTest do
     nodes = [:a, :b, :c, :d]
     n = 3
     w = 3
-    Cluster.start(%{foo: 42}, nodes, n, 1, w, 9999, 9999, 100, 500, 9999)
+    Cluster.start(%{foo: 42}, nodes, n, w, w, 9999, 9999, 200, 500, 9999)
 
     pref_list =
       HashRing.find_nodes(HashRing.new(nodes, 1), :foo, Enum.count(nodes))
@@ -1159,7 +1159,18 @@ defmodule DynamoNodeTest do
 
     # send get request so coordinator knows pref_2 has crashed
     send(pref_1, %ClientRequest.Get{nonce: Nonce.new(), key: :foo})
-    wait(500)
+    wait(1000)
+
+    crash_test_nonce = Nonce.new()
+    send(pref_1, %TestRequest{nonce: crash_test_nonce})
+
+    assert_receive %TestResponse{
+                     nonce: ^crash_test_nonce,
+                     state: %DynamoNode{nodes_alive: nodes_alive}
+                   },
+                   200
+
+    assert Map.get(nodes_alive, pref_2) == false
 
     # send put request to establish hinted data at pref_4
     put_nonce = Nonce.new()
@@ -1174,6 +1185,16 @@ defmodule DynamoNodeTest do
     wait(500)
 
     # hint should be present at pref_4 by now
+    hint_test_nonce = Nonce.new()
+    send(pref_4, %TestRequest{nonce: hint_test_nonce})
+
+    assert_receive %TestResponse{
+                     nonce: ^hint_test_nonce,
+                     state: %DynamoNode{
+                       store: %{foo: {[49], %Context{hint: pref_2}}}
+                     }
+                   },
+                   200
 
     # crashed node recovers
     send(pref_2, :recover)
@@ -1187,7 +1208,10 @@ defmodule DynamoNodeTest do
     send(pref_2, %TestRequest{nonce: test_2_nonce})
     assert_receive %TestResponse{nonce: ^test_2_nonce, state: pref_2_state}, 500
 
-    assert {[49], _context} = Map.get(pref_2_state.store, :foo)
+    assert {[49], context} = Map.get(pref_2_state.store, :foo)
+
+    assert context.hint == nil,
+           "Handed off data shouldn't have the hint anymore"
 
     test_4_nonce = Nonce.new()
     send(pref_4, %TestRequest{nonce: test_4_nonce})
