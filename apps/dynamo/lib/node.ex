@@ -1343,8 +1343,13 @@ defmodule DynamoNode do
   @spec handoff_hinted_data(%DynamoNode{}, any()) :: %DynamoNode{}
   def handoff_hinted_data(state, node) do
     handoff_data =
-      Enum.filter(state.store, fn {_key, {_values, context}} ->
+      state.store
+      |> Enum.filter(fn {_key, {_values, context}} ->
         context.hint == node
+      end)
+      # remove hint when handing off
+      |> Enum.filter(fn {key, {values, context}} ->
+        {key, {values, %{context | hint: nil}}}
       end)
 
     if Enum.empty?(handoff_data) do
