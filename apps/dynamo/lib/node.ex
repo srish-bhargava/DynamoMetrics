@@ -851,6 +851,8 @@ defmodule DynamoNode do
 
         if not Enum.empty?(alive_nodes) do
           syncing_with = Enum.random(alive_nodes)
+          Logger.debug("Syncing with #{inspect(syncing_with)}")
+
           # figure out intersection of keys
           common_keys =
             state.store
