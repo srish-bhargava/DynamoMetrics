@@ -829,24 +829,26 @@ defmodule DynamoNode do
       :replica_sync_timeout = msg ->
         Logger.info("Received #{inspect(msg)}")
         # time to sync with a random alive node
-        syncing_with =
-          state.nodes_alive
-          |> Enum.filter(fn {_node, alive} -> alive end)
-          |> Enum.random()
+        alive_nodes =
+          Enum.filter(state.nodes_alive, fn {_node, alive} -> alive end)
 
-        # figure out intersection of keys
-        common_keys =
-          state.store
-          |> Map.keys()
-          |> Enum.filter(fn key ->
-            syncing_with in get_preference_list(state, key)
-          end)
+        if not Enum.empty?(alive_nodes) do
+          syncing_with = Enum.random(alive_nodes)
+          # figure out intersection of keys
+          common_keys =
+            state.store
+            |> Map.keys()
+            |> Enum.filter(fn key ->
+              syncing_with in get_preference_list(state, key)
+            end)
 
-        # send data for these common keys
-        common_data = Map.take(state.store, common_keys)
-        send(syncing_with, %ReplicaSyncRequest{data: common_data})
+          # send data for these common keys
+          common_data = Map.take(state.store, common_keys)
+          send(syncing_with, %ReplicaSyncRequest{data: common_data})
 
-        timer(state.replica_sync_interval, :replica_sync_interval)
+          timer(state.replica_sync_interval, :replica_sync_interval)
+        end
+
         listener(state)
 
       {node, %ReplicaSyncRequest{data: data} = msg} ->
