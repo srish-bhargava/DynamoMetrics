@@ -78,7 +78,19 @@ defmodule DynamoNodeTest do
       for node <- nodes do
         Process.monitor(
           spawn(node, fn ->
-            DynamoNode.start(node, %{}, nodes, 1, 1, 1, 1_000, 1_000, 9999, 500, 700)
+            DynamoNode.start(
+              node,
+              %{},
+              nodes,
+              1,
+              1,
+              1,
+              1_000,
+              1_000,
+              9999,
+              500,
+              700
+            )
           end)
         )
       end
@@ -167,7 +179,18 @@ defmodule DynamoNodeTest do
   end
 
   test "First get request returns the initial value" do
-    Cluster.start(%{foo: 42}, [:a, :b, :c], 3, 2, 2, 1_000, 1_000, 9999, 500, 700)
+    Cluster.start(
+      %{foo: 42},
+      [:a, :b, :c],
+      3,
+      2,
+      2,
+      1_000,
+      1_000,
+      9999,
+      500,
+      700
+    )
 
     nonce = Nonce.new()
     send(:a, %ClientRequest.Get{nonce: nonce, key: :foo})
@@ -221,7 +244,18 @@ defmodule DynamoNodeTest do
   end
 
   test "put request overwrites key in initial data" do
-    Cluster.start(%{foo: 37}, [:a, :b, :c], 1, 1, 1, 1_000, 1_000, 9999, 500, 700)
+    Cluster.start(
+      %{foo: 37},
+      [:a, :b, :c],
+      1,
+      1,
+      1,
+      1_000,
+      1_000,
+      9999,
+      500,
+      700
+    )
 
     nonce_put = Nonce.new()
     nonce_get = Nonce.new()
@@ -491,7 +525,19 @@ defmodule DynamoNodeTest do
 
   test "Crashed node responds to messages after recovery" do
     spawn(:a, fn ->
-      DynamoNode.start(:a, %{foo: 42}, [:a], 1, 1, 1, 500, 1_000, 9999, 500, 700)
+      DynamoNode.start(
+        :a,
+        %{foo: 42},
+        [:a],
+        1,
+        1,
+        1,
+        500,
+        1_000,
+        9999,
+        500,
+        700
+      )
     end)
 
     send(:a, :crash)
@@ -587,7 +633,19 @@ defmodule DynamoNodeTest do
 
   test "Follower considers crashed coordinator dead after trying to redirect" do
     data = Map.new(1..100, fn key -> {key, key * 42} end)
-    Cluster.start(data, [:a, :gonna_crash], 1, 1, 1, 1_000, 1_000, 200, 500, 700)
+
+    Cluster.start(
+      data,
+      [:a, :gonna_crash],
+      1,
+      1,
+      1,
+      1_000,
+      1_000,
+      200,
+      500,
+      700
+    )
 
     send(:gonna_crash, :crash)
 
@@ -611,7 +669,19 @@ defmodule DynamoNodeTest do
 
   test "Follower considers recovered crashed coordinator alive" do
     data = Map.new(1..100, fn key -> {key, key * 42} end)
-    Cluster.start(data, [:a, :gonna_crash], 1, 1, 1, 1_000, 1_000, 200, 500, 700)
+
+    Cluster.start(
+      data,
+      [:a, :gonna_crash],
+      1,
+      1,
+      1,
+      1_000,
+      1_000,
+      200,
+      500,
+      700
+    )
 
     send(:gonna_crash, :crash)
 
@@ -852,9 +922,20 @@ defmodule DynamoNodeTest do
     end
 
     nonce = Nonce.new()
-    send(pref_1, %ClientRequest.Put{nonce: nonce, key: :foo, value: 49, context: new_context()})
 
-    assert_receive %ClientResponse.Put{nonce: ^nonce, success: true, context: _context}, 1200
+    send(pref_1, %ClientRequest.Put{
+      nonce: nonce,
+      key: :foo,
+      value: 49,
+      context: new_context()
+    })
+
+    assert_receive %ClientResponse.Put{
+                     nonce: ^nonce,
+                     success: true,
+                     context: _context
+                   },
+                   1200
   end
 
   test "Coordinator figures out who's alive after put request" do
@@ -864,18 +945,27 @@ defmodule DynamoNodeTest do
     Cluster.start(%{foo: 42}, nodes, n, 1, w, 1000, 9999, 200, 9999, 9999)
 
     # figure out pref list
-    pref_list = HashRing.find_nodes(HashRing.new(nodes, 1), :foo, Enum.count(nodes))
+    pref_list =
+      HashRing.find_nodes(HashRing.new(nodes, 1), :foo, Enum.count(nodes))
+
     Logger.debug("preference list: #{inspect(pref_list)}")
     [pref_1, pref_2, pref_3, _pref_4, _pref_5, pref_6] = pref_list
 
     # crash 2 nodes in pref list
     crash_nodes = [pref_2, pref_3, pref_6]
+
     for node <- crash_nodes do
       send(node, :crash)
     end
 
     nonce = Nonce.new()
-    send(pref_1, %ClientRequest.Put{nonce: nonce, key: :foo, value: 49, context: new_context()})
+
+    send(pref_1, %ClientRequest.Put{
+      nonce: nonce,
+      key: :foo,
+      value: 49,
+      context: new_context()
+    })
 
     wait(1200)
 
@@ -896,12 +986,15 @@ defmodule DynamoNodeTest do
     Cluster.start(%{foo: 42}, nodes, n, r, 1, 1000, 9999, 200, 9999, 9999)
 
     # figure out pref list
-    pref_list = HashRing.find_nodes(HashRing.new(nodes, 1), :foo, Enum.count(nodes))
+    pref_list =
+      HashRing.find_nodes(HashRing.new(nodes, 1), :foo, Enum.count(nodes))
+
     Logger.debug("preference list: #{inspect(pref_list)}")
     [pref_1, pref_2, pref_3, _pref_4, _pref_5, pref_6] = pref_list
 
     # crash 2 nodes in pref list
     crash_nodes = [pref_2, pref_3, pref_6]
+
     for node <- crash_nodes do
       send(node, :crash)
     end

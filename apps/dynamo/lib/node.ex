@@ -442,13 +442,14 @@ defmodule DynamoNode do
 
         stored = Map.get(state.store, key)
 
-        {resp_values, resp_context} = case stored do
-          {values, context} ->
-            {values, context}
+        {resp_values, resp_context} =
+          case stored do
+            {values, context} ->
+              {values, context}
 
-          nil ->
-            {[], %Context{version: VectorClock.new()}}
-        end
+            nil ->
+              {[], %Context{version: VectorClock.new()}}
+          end
 
         send(coordinator, %CoordinatorResponse.Get{
           nonce: nonce,
@@ -825,7 +826,7 @@ defmodule DynamoNode do
 
       # replica synchronization
       :replica_sync_timeout = msg ->
-        Logger.info("Received #{inspect msg}")
+        Logger.info("Received #{inspect(msg)}")
         # time to sync with a random alive node
         syncing_with =
           state.nodes_alive
@@ -836,7 +837,9 @@ defmodule DynamoNode do
         common_keys =
           state.store
           |> Map.keys()
-          |> Enum.filter(fn key -> syncing_with in get_preference_list(state, key) end)
+          |> Enum.filter(fn key ->
+            syncing_with in get_preference_list(state, key)
+          end)
 
         # send data for these common keys
         common_data = Map.take(state.store, common_keys)
