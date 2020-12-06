@@ -105,9 +105,12 @@ defmodule DynamoNode do
     }
 
     # what keys have we handed off, and which contexts
+    # for each node
     field :pending_handoffs, %{
-      required(Nonce.t()) => %{
-        required(any()) => %Context{}
+      required(any()) => %{
+        required(Nonce.t()) => %{
+          required(any()) => %Context{}
+        }
       }
     }
   end
@@ -525,12 +528,21 @@ defmodule DynamoNode do
         Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
         state = mark_alive(state, node)
 
-        if not Map.has_key?(state.pending_handoffs, nonce) do
+        node_pending_handoffs = Map.get(state.pending_handoffs, node, %{})
+
+        if not Map.has_key?(node_pending_handoffs, nonce) do
           # this handoff timed out already, so ignore this response
           listener(state)
         else
-          {keys, new_pending_handoffs} = Map.pop!(state.pending_handoffs, nonce)
-          state = %{state | pending_handoffs: new_pending_handoffs}
+          {keys, new_node_pending_handoffs} =
+            Map.pop!(node_pending_handoffs, nonce)
+
+          state = %{
+            state
+            | pending_handoffs:
+                Map.put(state.pending_handoffs, node, new_node_pending_handoffs)
+          }
+
           state = delete_handed_off_keys(state, keys)
           listener(state)
         end
@@ -783,14 +795,19 @@ defmodule DynamoNode do
         # when it comes alive
         Logger.info("Received #{inspect(msg)}")
 
-        if Map.has_key?(state.pending_handoffs, nonce) do
+        node_pending_handoffs = Map.get(state.pending_handoffs, node, %{})
+
+        if Map.has_key?(node_pending_handoffs, nonce) do
           # didn't receive response before this timeout
           # so mark node dead, and remove this from pending
           state = mark_dead(state, node)
 
+          new_node_pending_handoffs = Map.delete(node_pending_handoffs, nonce)
+
           state = %{
             state
-            | pending_handoffs: Map.delete(state.pending_handoffs, nonce)
+            | pending_handoffs:
+                Map.put(state.pending_handoffs, node, new_node_pending_handoffs)
           }
 
           listener(state)
@@ -1342,15 +1359,40 @@ defmodule DynamoNode do
   """
   @spec handoff_hinted_data(%DynamoNode{}, any()) :: %DynamoNode{}
   def handoff_hinted_data(state, node) do
+    # data which we've tried to handoff and which we've not received
+    # a response or a timeout for, yet
+    # we should NOT try to hand this off again now
+    node_pending_handoffs = Map.get(state.pending_handoffs, node, %{})
+
+    pending_handoff_data =
+      node_pending_handoffs
+      |> Map.values()
+      |> Enum.reduce(%{}, fn left, right ->
+        Map.merge(left, right, fn _key, ctx1, ctx2 ->
+          Context.combine(ctx1, ctx2)
+        end)
+      end)
+
     handoff_data =
       state.store
       |> Enum.filter(fn {_key, {_values, context}} ->
         context.hint == node
       end)
+      # don't request pending handoff data again
+      |> Enum.filter(fn {key, {_values, new_context}} ->
+        pending_context = Map.get(pending_handoff_data, key)
+
+        should_request? =
+          pending_context == nil or
+            Context.compare(new_context, pending_context) == :after
+
+        should_request?
+      end)
       # remove hint when handing off
-      |> Enum.filter(fn {key, {values, context}} ->
+      |> Enum.map(fn {key, {values, context}} ->
         {key, {values, %{context | hint: nil}}}
       end)
+      |> Map.new()
 
     if Enum.empty?(handoff_data) do
       state
@@ -1368,9 +1410,16 @@ defmodule DynamoNode do
       )
 
       # make this request pending in state
+      handoff_keys =
+        Map.new(handoff_data, fn {key, {_value, context}} -> {key, context} end)
+
+      new_node_pending_handoffs =
+        Map.put(node_pending_handoffs, nonce, handoff_keys)
+
       %{
         state
-        | pending_handoffs: Map.put(state.pending_handoffs, nonce, %{})
+        | pending_handoffs:
+            Map.put(state.pending_handoffs, node, new_node_pending_handoffs)
       }
     end
   end
