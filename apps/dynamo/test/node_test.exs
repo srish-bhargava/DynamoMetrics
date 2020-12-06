@@ -938,6 +938,38 @@ defmodule DynamoNodeTest do
                    1200
   end
 
+  test "Get request succeeds even with a lot of crashed nodes in pref list" do
+    nodes = [:a, :b, :c, :d, :e, :f]
+    n = 4
+    r = 4
+    Cluster.start(%{foo: 42}, nodes, n, r, 1, 1000, 9999, 200, 9999, 9999)
+
+    # figure out pref list
+    pref_list = HashRing.find_nodes(HashRing.new(nodes, 1), :foo, 4)
+    Logger.debug("preference list: #{inspect(pref_list)}")
+    [pref_1, pref_2, pref_3, _pref_4] = pref_list
+
+    # crash 2 nodes in pref list
+    for node <- [pref_2, pref_3] do
+      send(node, :crash)
+    end
+
+    nonce = Nonce.new()
+
+    send(pref_1, %ClientRequest.Get{
+      nonce: nonce,
+      key: :foo
+    })
+
+    assert_receive %ClientResponse.Get{
+                     nonce: ^nonce,
+                     success: true,
+                     values: [42],
+                     context: _context
+                   },
+                   1200
+  end
+
   test "Coordinator figures out who's alive after put request" do
     nodes = [:a, :b, :c, :d, :e, :f]
     n = 4
