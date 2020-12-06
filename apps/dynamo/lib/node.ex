@@ -860,11 +860,22 @@ defmodule DynamoNode do
             state.store
             |> Map.keys()
             |> Enum.filter(fn key ->
-              syncing_with in get_preference_list(state, key)
+              pref_list = get_preference_list(state, key)
+              # ensure both of us are in the pref list for this
+              # because we might have hinted keys that *we're* not in
+              # the pref list for. Maintaing hints due to this
+              # becomes confusing.
+              syncing_with in pref_list and state.id in pref_list
             end)
 
           # send data for these common keys
-          common_data = Map.take(state.store, common_keys)
+          # but don't send the hints
+          common_data =
+            for {key, {value, context}} <- Map.take(state.store, common_keys),
+                into: %{} do
+              {key, {value, %{context | hint: nil}}}
+            end
+
           send(syncing_with, %ReplicaSyncRequest{data: common_data})
 
           timer(state.replica_sync_timeout, :replica_sync_timeout)
