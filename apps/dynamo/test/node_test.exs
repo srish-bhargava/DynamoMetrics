@@ -1058,7 +1058,7 @@ defmodule DynamoNodeTest do
 
     Logger.debug("preference list: #{inspect(pref_list)}")
 
-    [pref_1, pref_2, pref_3, _pref_4, _pref_5, pref_6, _pref_7, _pref_8] =
+    [pref_1, pref_2, pref_3, pref_4, _pref_5, pref_6, _pref_7, _pref_8] =
       pref_list
 
     # crash top 3 nodes in pref list
@@ -1103,7 +1103,7 @@ defmodule DynamoNodeTest do
 
     Logger.debug("preference list: #{inspect(pref_list)}")
 
-    [pref_1, pref_2, pref_3, _pref_4, _pref_5, pref_6, _pref_7, _pref_8] =
+    [pref_1, pref_2, pref_3, pref_4, _pref_5, pref_6, _pref_7, _pref_8] =
       pref_list
 
     # crash top 3 nodes in pref list
@@ -1114,20 +1114,31 @@ defmodule DynamoNodeTest do
     end
 
     # send request to a non-coordinator
-    nonce = Nonce.new()
+    client_nonce = Nonce.new()
 
     send(pref_6, %ClientRequest.Put{
-      nonce: nonce,
+      nonce: client_nonce,
       key: :foo,
       value: 49,
       context: new_context()
     })
 
-    assert_receive %ClientResponse.Put{
-                     nonce: ^nonce,
-                     success: true,
-                     context: _context
-                   },
-                   1200
+    wait(700)
+
+    # check that pref_4 is the coordinator for this request
+    test_nonce = Nonce.new()
+    send(pref_4, %TestRequest{nonce: test_nonce})
+    assert_receive %TestResponse{nonce: ^test_nonce, state: state}, 200
+    assert Map.has_key?(state.pending_puts, client_nonce)
+
+    wait(1000)
+
+    # check that the request succeeds
+
+    assert_received %ClientResponse.Put{
+      nonce: ^client_nonce,
+      success: true,
+      context: _context
+    }
   end
 end
