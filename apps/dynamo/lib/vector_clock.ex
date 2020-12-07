@@ -86,6 +86,8 @@ defmodule VectorClock do
       end
 
     cond do
+      # comparing two empty clocks
+      Enum.empty?(comparisons) -> :concurrent
       # before at some points and after at others => no order
       :before in comparisons and :after in comparisons -> :concurrent
       # completely equal
