@@ -411,11 +411,12 @@ defmodule DynamoNode do
       {node,
        %RedirectedClientRequest{
          client: client,
-         request: %ClientRequest.Get{} = orig_msg
+         request: %ClientRequest.Get{nonce: nonce} = orig_msg
        } = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
         state = mark_alive(state, node)
-
+        # let redirecter know we're handling this request
+        send(node, %RedirectAcknowledgement{nonce: nonce})
         # we must be the coordinator for this key
         state = coord_handle_get_req(state, client, orig_msg)
         listener(state)
@@ -423,25 +424,31 @@ defmodule DynamoNode do
       {node,
        %RedirectedClientRequest{
          client: client,
-         request: %ClientRequest.Put{} = orig_msg
+         request: %ClientRequest.Put{nonce: nonce} = orig_msg
        } = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
         state = mark_alive(state, node)
-
+        # let redirecter know we're handling this request
+        send(node, %RedirectAcknowledgement{nonce: nonce})
         # we must be the coordinator for this key
         state = coord_handle_put_req(state, client, orig_msg)
         listener(state)
 
-      # coordinator requests
-      {coordinator, %CoordinatorRequest.Get{nonce: nonce, key: key} = msg} ->
-        Logger.info("Received #{inspect(msg)} from #{inspect(coordinator)}")
+      {node, %RedirectAcknowledgement{nonce: nonce} = msg} ->
+        Logger.info("Received #{inspect(msg)} from #{inspect(node)}")
+        state = mark_alive(state, node)
 
-        # request has been handler (in case we were trying to redirect it)
+        # redirect has been handled
         state = %{
           state
           | pending_redirects: Map.delete(state.pending_redirects, nonce)
         }
 
+        listener(state)
+
+      # coordinator requests
+      {coordinator, %CoordinatorRequest.Get{nonce: nonce, key: key} = msg} ->
+        Logger.info("Received #{inspect(msg)} from #{inspect(coordinator)}")
         state = mark_alive(state, coordinator)
 
         stored = Map.get(state.store, key)
@@ -473,13 +480,6 @@ defmodule DynamoNode do
          context: context
        } = msg} ->
         Logger.info("Received #{inspect(msg)} from #{inspect(coordinator)}")
-
-        # request has been handler (in case we were trying to redirect it)
-        state = %{
-          state
-          | pending_redirects: Map.delete(state.pending_redirects, nonce)
-        }
-
         state = mark_alive(state, coordinator)
         state = put(state, key, [value], context)
 
