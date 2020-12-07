@@ -101,6 +101,8 @@ defmodule MeasureStatistics do
     stale_reads_percent =
       Float.round(state.num_stale_reads * 100 / total_requests, 2)
 
+    Logger.flush()
+
     IO.puts("\n\n\n")
     IO.puts("----------------------------")
     IO.puts("    Measurements finished   ")
