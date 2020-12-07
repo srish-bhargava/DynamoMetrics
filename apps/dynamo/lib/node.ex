@@ -277,6 +277,7 @@ defmodule DynamoNode do
     %ClientResponse.Put{
       nonce: nonce,
       success: false,
+      values: nil,
       context: nil
     }
   end
@@ -582,11 +583,7 @@ defmodule DynamoNode do
         else
           # request timed out, get rid of the pending entry
           # and respond failure to client
-          send(req_state.client, %ClientResponse.Put{
-            nonce: nonce,
-            success: false,
-            context: nil
-          })
+          send(req_state.client, client_put_fail_msg(nonce))
 
           listener(%{
             state
@@ -1064,11 +1061,6 @@ defmodule DynamoNode do
 
     # write to own store
     state = put(state, key, [value], context)
-
-    # we tell the client the final context, which should indicate to them whether
-    # their request succeeds or not (based on Context.compare)
-    {_values, resp_context} = Map.get(state.store, key)
-
     # don't send put request to self
     to_request =
       get_alive_preference_list_with_intended(state, key)
@@ -1092,9 +1084,15 @@ defmodule DynamoNode do
     if state.w <= 1 do
       # we've already written once, so this is enough
       # respond to client, and don't mark this request as pending
+
+      # we return the values so that the client can check if
+      # their put request is persisted
+      {resp_values, resp_context} = Map.get(state.store, key)
+
       send(client, %ClientResponse.Put{
         nonce: nonce,
         success: true,
+        values: resp_values,
         context: resp_context
       })
 
@@ -1123,7 +1121,7 @@ defmodule DynamoNode do
               client: client,
               key: key,
               value: value,
-              context: resp_context,
+              context: context,
               responses: MapSet.new(),
               requested: Map.new(to_request),
               last_requested_index: last_requested_index
@@ -1171,10 +1169,13 @@ defmodule DynamoNode do
         )
 
         # enough responses, respond to client
+        {resp_values, resp_context} = Map.get(state.store, new_req_state.key)
+
         send(new_req_state.client, %ClientResponse.Put{
           nonce: nonce,
           success: true,
-          context: new_req_state.context
+          values: resp_values,
+          context: resp_context
         })
 
         # request not pending anymore, so get rid of the entry

@@ -87,6 +87,7 @@ defmodule ClientResponse.Put do
     """
     field :nonce, Nonce.t()
     field :success, boolean()
+    field :values, [any()] | nil
     field :context, %Context{} | nil
   end
 end
