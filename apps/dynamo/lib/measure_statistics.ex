@@ -8,7 +8,15 @@ defmodule MeasureStatistics do
 
   def measure(duration) do
     Emulation.init()
-    Emulation.append_fuzzers([Fuzzers.delay(1.0), Fuzzers.drop(0.05)])
+
+    # failure parameters
+    mean_delay = 1.0
+    drop_rate = 0.05
+
+    Emulation.append_fuzzers([
+      Fuzzers.delay(mean_delay),
+      Fuzzers.drop(drop_rate)
+    ])
 
     # ------------------------
     # -- cluster parameters --
@@ -22,7 +30,7 @@ defmodule MeasureStatistics do
     # timeouts
     coordinator_timeout = 300
     total_redirect_timeout = 300
-    request_timeout = 100
+    request_timeout = 700
     alive_check_interval = 200
     replica_sync_interval = 500
 
@@ -107,7 +115,11 @@ defmodule MeasureStatistics do
     IO.puts("----------------------------")
     IO.puts("    Measurements finished   ")
     IO.puts("----------------------------")
-    IO.puts("Duration: #{duration / 1000} seconds")
+    IO.puts("Duration:        #{duration / 1000} s")
+    IO.puts("Request rate:    #{min_request_rate}-#{max_request_rate}/s")
+    IO.puts("Drop rate:       #{drop_rate * 100}%")
+    IO.puts("Mean delay:      #{mean_delay} s")
+    IO.puts("----------------------------")
     IO.puts("Total requests:  #{total_requests}")
     IO.puts("Availability:    #{availability_percent}%")
     IO.puts("Inconsistencies: #{inconsistency_percent}%")
