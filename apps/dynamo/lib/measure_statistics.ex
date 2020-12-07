@@ -109,7 +109,18 @@ defmodule MeasureStatistics do
   end
 
   def measure_loop(state) do
-    # whenever we send a request
+    state = send_random_client_request(state)
+    state = handle_recvd_msgs(state)
+    wait_before_next_request(state)
+
+    if finished?() do
+      state
+    else
+      measure_loop(state)
+    end
+  end
+
+  def create_random_client_request(state) do
     # things to choose from:
     # 1. get or put request
     # 2. which node to send to
@@ -118,10 +129,10 @@ defmodule MeasureStatistics do
     #   4. which context
     # }
     # if put, then the value is chosen for us by (10 + last_written[key])
-    # 5. timeout for next request
+    #
+    # We pick from all of these randomly.
 
     get_or_put = Enum.random([:get, :put])
-    node = Enum.random(state.nodes)
     {key, last_value} = Enum.random(state.last_written)
     context_idx = Enum.random(1..Enum.count(state.contexts)) - 1
     context = Enum.at(state.contexts, context_idx)
@@ -130,187 +141,189 @@ defmodule MeasureStatistics do
 
     if Map.has_key?(state.pending_gets, nonce) or
          Map.has_key?(state.pending_puts, nonce) do
+      # This should almost never happen
+      # In case it does, just try agian
       raise "Duplicate nonce!"
     end
 
-    state =
-      if get_or_put == :get do
-        msg = %ClientRequest.Get{
-          nonce: nonce,
-          key: key
-        }
+    msg =
+      case get_or_put do
+        :get ->
+          %ClientRequest.Get{
+            nonce: nonce,
+            key: key
+          }
 
-        Logger.warn(
-          "Sending: #{inspect(msg, pretty: true)} to #{inspect(node)}"
-        )
+        :put ->
+          %ClientRequest.Put{
+            nonce: nonce,
+            key: key,
+            value: last_value + 10,
+            context: context
+          }
+      end
 
-        send(node, msg)
+    {msg, context_idx}
+  end
 
+  def send_random_client_request(state) do
+    node = Enum.random(state.nodes)
+    {msg, context_idx} = create_random_client_request(state)
+
+    Logger.warn("Sending: #{inspect(msg, pretty: true)} to #{inspect(node)}")
+    send(node, msg)
+
+    case msg do
+      %ClientRequest.Get{nonce: nonce, key: key} ->
         %{
           state
           | pending_gets:
               Map.put(state.pending_gets, nonce, %{
-                expected_value: last_value,
+                expected_value: Map.fetch!(state.last_written, key),
                 msg: msg,
                 context_idx: context_idx
               })
         }
-      else
-        writing_value = last_value + 10
 
-        msg = %ClientRequest.Put{
-          nonce: nonce,
-          key: key,
-          value: writing_value,
-          context: context
-        }
-
-        Logger.warn(
-          "Sending: #{inspect(msg, pretty: true)} to #{inspect(node)}"
-        )
-
-        send(node, msg)
-
+      %ClientRequest.Put{nonce: nonce} ->
         %{
           state
           | pending_puts:
               Map.put(state.pending_puts, nonce, %{
-                writing_value: writing_value,
                 msg: msg,
                 context_idx: context_idx
               })
         }
-      end
+    end
+  end
 
+  def handle_recvd_msgs(state) do
     # go over all recvd messages
     all_recvd_msgs = recv_all_msgs_in_mailbox()
     Logger.critical("#{Enum.count(all_recvd_msgs)} messages received")
 
-    state =
-      for msg <- all_recvd_msgs, reduce: state do
-        state_acc ->
-          Logger.warn("Received: #{inspect(msg, pretty: true)}")
+    for msg <- all_recvd_msgs, reduce: state do
+      state_acc ->
+        Logger.warn("Received: #{inspect(msg, pretty: true)}")
 
-          case msg do
-            %ClientResponse.Get{
-              nonce: nonce,
-              success: success,
-              values: values,
-              context: context
-            } ->
-              {%{
-                 expected_value: expected_value,
-                 msg: msg,
-                 context_idx: context_idx
-               }, new_pending_gets} = Map.pop!(state_acc.pending_gets, nonce)
+        case msg do
+          %ClientResponse.Get{
+            nonce: nonce,
+            success: success,
+            values: values,
+            context: context
+          } ->
+            {%{
+               expected_value: expected_value,
+               msg: msg,
+               context_idx: context_idx
+             }, new_pending_gets} = Map.pop!(state_acc.pending_gets, nonce)
 
-              state_acc = %{state_acc | pending_gets: new_pending_gets}
+            state_acc = %{state_acc | pending_gets: new_pending_gets}
 
-              if success == false do
-                %{
-                  state_acc
-                  | num_requests_failed: state_acc.num_requests_failed + 1
-                }
-              else
-                # update context at context_idx
-                updated_contexts =
-                  List.update_at(state_acc.contexts, context_idx, fn _ctx ->
-                    context
-                  end)
+            if success == false do
+              %{
+                state_acc
+                | num_requests_failed: state_acc.num_requests_failed + 1
+              }
+            else
+              # update context at context_idx
+              updated_contexts =
+                List.update_at(state_acc.contexts, context_idx, fn _ctx ->
+                  context
+                end)
 
-                inconsistency? = Enum.count(values) > 1
-                # NOTE: We assume the following to NOT be a stale read:
-                #   write 10
-                #   write 20
-                #   write 30
-                #   read
-                #   write 40
-                #   * get read response values = [10, 40] while expecting 30
-                stale_read? =
-                  Enum.all?(
-                    values,
-                    fn recvd_value -> recvd_value < expected_value end
+              inconsistency? = Enum.count(values) > 1
+              # NOTE: We assume the following to NOT be a stale read:
+              #   write 10
+              #   write 20
+              #   write 30
+              #   read
+              #   write 40
+              #   * get read response values = [10, 40] while expecting 30
+              stale_read? =
+                Enum.all?(
+                  values,
+                  fn recvd_value -> recvd_value < expected_value end
+                )
+
+              if stale_read? do
+                Logger.error(
+                  "Stale read - For key #{inspect(msg.key)}, expected: #{
+                    inspect(expected_value)
+                  }, got: #{inspect(values, as_charlist: false)}"
+                )
+
+                raise "Stale read!"
+              end
+
+              %{
+                state_acc
+                | num_requests_succeeded: state_acc.num_requests_succeeded + 1,
+                  num_inconsistencies:
+                    state_acc.num_inconsistencies +
+                      if(inconsistency?, do: 1, else: 0),
+                  num_stale_reads:
+                    state_acc.num_stale_reads +
+                      if(stale_read?, do: 1, else: 0),
+                  contexts: updated_contexts
+              }
+            end
+
+          %ClientResponse.Put{
+            nonce: nonce,
+            success: success,
+            context: context
+          } ->
+            {%{
+               msg: msg,
+               context_idx: context_idx
+             }, new_pending_puts} = Map.pop!(state_acc.pending_puts, nonce)
+
+            state_acc = %{state_acc | pending_puts: new_pending_puts}
+
+            if success == false do
+              %{
+                state_acc
+                | num_requests_failed: state_acc.num_requests_failed + 1
+              }
+            else
+              # update context at context_idx
+              updated_contexts =
+                List.update_at(state_acc.contexts, context_idx, fn _ctx ->
+                  context
+                end)
+
+              # potentially update last_written
+              update_last_written =
+                if not VectorClock.before?(
+                     msg.context.version,
+                     context.version
+                   ) do
+                  # if the version we sent is concurrent with the version we got back
+                  # (or even *after*,but that should not be possible)
+                  # then we know the value has been persisted
+                  Map.update!(
+                    state_acc.last_written,
+                    msg.key,
+                    &max(msg.value, &1)
                   )
-
-                if stale_read? do
-                  Logger.error(
-                    "Stale read - For key #{inspect(msg.key)}, expected: #{
-                      inspect(expected_value)
-                    }, got: #{inspect(values, as_charlist: false)}"
-                  )
-
-                  raise "Stale read!"
+                else
+                  state_acc.last_written
                 end
 
-                %{
-                  state_acc
-                  | num_requests_succeeded:
-                      state_acc.num_requests_succeeded + 1,
-                    num_inconsistencies:
-                      state_acc.num_inconsistencies +
-                        if(inconsistency?, do: 1, else: 0),
-                    num_stale_reads:
-                      state_acc.num_stale_reads +
-                        if(stale_read?, do: 1, else: 0),
-                    contexts: updated_contexts
-                }
-              end
+              %{
+                state_acc
+                | num_requests_succeeded: state_acc.num_requests_succeeded + 1,
+                  contexts: updated_contexts,
+                  last_written: update_last_written
+              }
+            end
+        end
+    end
+  end
 
-            %ClientResponse.Put{
-              nonce: nonce,
-              success: success,
-              context: context
-            } ->
-              {%{
-                 writing_value: writing_value,
-                 msg: msg,
-                 context_idx: context_idx
-               }, new_pending_puts} = Map.pop!(state_acc.pending_puts, nonce)
-
-              state_acc = %{state_acc | pending_puts: new_pending_puts}
-
-              if success == false do
-                %{
-                  state_acc
-                  | num_requests_failed: state_acc.num_requests_failed + 1
-                }
-              else
-                # update context at context_idx
-                updated_contexts =
-                  List.update_at(state_acc.contexts, context_idx, fn _ctx ->
-                    context
-                  end)
-
-                # potentially update last_written
-                update_last_written =
-                  if not VectorClock.before?(
-                       msg.context.version,
-                       context.version
-                     ) do
-                    # if the version we sent is concurrent with the version we got back
-                    # (or even *after*,but that should not be possible)
-                    # then we know the value has been persisted
-                    # Logger.critical("Updating last_written[#{inspect key}] = max(#{inspect writing_value}, &1) since VectorClock.compare(msg.context.version, context) = VectorClock.compare(msg.context.version, context)")
-                    Map.update!(
-                      state_acc.last_written,
-                      msg.key,
-                      &max(writing_value, &1)
-                    )
-                  else
-                    state_acc.last_written
-                  end
-
-                %{
-                  state_acc
-                  | num_requests_succeeded:
-                      state_acc.num_requests_succeeded + 1,
-                    contexts: updated_contexts,
-                    last_written: update_last_written
-                }
-              end
-          end
-      end
-
+  def wait_before_next_request(state) do
     # Wait for next request timeout
     next_request_timeout =
       Enum.random(state.min_request_interval..state.max_request_interval)
@@ -319,14 +332,13 @@ defmodule MeasureStatistics do
     after
       next_request_timeout -> true
     end
+  end
 
-    # send client requests to nodes
-    # receive responses
-    # until you receive a timeout
+  def finished?() do
     receive do
-      :measure_finish -> state
+      :measure_finish -> true
     after
-      0 -> measure_loop(state)
+      0 -> false
     end
   end
 
