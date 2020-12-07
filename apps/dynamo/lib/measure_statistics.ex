@@ -90,9 +90,15 @@ defmodule MeasureStatistics do
 
     # calculate stats
     total_requests = state.num_requests_failed + state.num_requests_succeeded
-    availability_percent = state.num_requests_succeeded * 100 / total_requests
-    inconsistency_percent = state.num_inconsistencies * 100 / total_requests
-    stale_reads_percent = state.num_stale_reads * 100 / total_requests
+
+    availability_percent =
+      Float.round(state.num_requests_succeeded * 100 / total_requests, 2)
+
+    inconsistency_percent =
+      Float.round(state.num_inconsistencies * 100 / total_requests, 2)
+
+    stale_reads_percent =
+      Float.round(state.num_stale_reads * 100 / total_requests, 2)
 
     IO.puts("\n\n\n")
     IO.puts("----------------------------")
