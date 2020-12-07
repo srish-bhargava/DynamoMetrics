@@ -1,5 +1,14 @@
 defmodule MeasureStatistics do
+  import Emulation, only: [send: 2]
+
+  import Kernel,
+    except: [spawn: 3, spawn: 1, spawn_link: 1, spawn_link: 3, send: 2]
+
+  require Logger
+
   def measure(duration) do
+    Emulation.init()
+
     # ------------------------
     # -- cluster parameters --
     # ------------------------
@@ -16,19 +25,33 @@ defmodule MeasureStatistics do
     alive_check_interval = 200
     replica_sync_interval = 500
 
+    # -- measuring parameters --
     # requests per second
-    peak_request_rate = 500
+    # fixed_request_rate = 100
+    # fixed_request_rate
+    max_request_rate = 500
+    # fixed_request_rate
+    min_request_rate = 200
+    num_clients = 5
 
-    # make up values for nodes and data
+    # make up values based on params
     data =
       for key <- 1..num_keys, into: %{} do
         {key, 10}
       end
 
     nodes =
-      for node_num do
+      for node_num <- 1..cluster_size, into: [] do
         "node-#{node_num}"
       end
+
+    contexts =
+      for _client <- 1..num_clients, into: [] do
+        %Context{version: VectorClock.new()}
+      end
+
+    min_request_interval = ceil(1000 / max_request_rate)
+    max_request_interval = floor(1000 / min_request_rate)
 
     Cluster.start(
       data,
@@ -51,15 +74,38 @@ defmodule MeasureStatistics do
       num_requests_failed: 0,
       num_requests_succeeded: 0,
       nodes: nodes,
-      contexts: [],
+      contexts: contexts,
       pending_gets: %{},
-      pending_puts: %{}
+      pending_puts: %{},
+      min_request_interval: min_request_interval,
+      max_request_interval: max_request_interval
     }
 
     # start timer for how long we want to run this simulation
-    timer(duration, :measure_finish)
+    # We cannot use Emulation.timer here here because this
+    # process has not been spawned by Emulation,
+    # so we use Process.send_after instead
+    Process.send_after(self(), :measure_finish, duration)
 
-    measure_loop(state)
+    state = measure_loop(state)
+
+    Emulation.terminate()
+
+    # calculate stats
+    total_requests = state.num_requests_failed + state.num_requests_succeeded
+    availability_percent = state.num_requests_succeeded * 100 / total_requests
+    inconsistency_percent = state.num_inconsistencies * 100 / total_requests
+    stale_reads_percent = state.num_stale_reads * 100 / total_requests
+
+    IO.puts("\n\n\n")
+    IO.puts("----------------------------")
+    IO.puts("    Measurements finished   ")
+    IO.puts("----------------------------")
+    IO.puts("Duration: #{duration / 1000} seconds")
+    IO.puts("Total requests:  #{total_requests}")
+    IO.puts("Availability:    #{availability_percent}%")
+    IO.puts("Inconsistencies: #{inconsistency_percent}%")
+    IO.puts("Stale reads:     #{stale_reads_percent}%")
   end
 
   def measure_loop(state) do
@@ -76,12 +122,16 @@ defmodule MeasureStatistics do
 
     get_or_put = Enum.random([:get, :put])
     node = Enum.random(state.nodes)
-    {key, last_written_val} = Enum.random(state.last_written)
-    context_idx = Enum.random(1..Enum.count(state.contexts))
+    {key, last_value} = Enum.random(state.last_written)
+    context_idx = Enum.random(1..Enum.count(state.contexts)) - 1
     context = Enum.at(state.contexts, context_idx)
 
     nonce = Nonce.new()
-    last_value = Map.fetch!(state.last_written, key)
+
+    if Map.has_key?(state.pending_gets, nonce) or
+         Map.has_key?(state.pending_puts, nonce) do
+      raise "Duplicate nonce!"
+    end
 
     state =
       if get_or_put == :get do
@@ -89,6 +139,12 @@ defmodule MeasureStatistics do
           nonce: nonce,
           key: key
         }
+
+        Logger.warn(
+          "Sending: #{inspect(msg, pretty: true)} to #{inspect(node)}"
+        )
+
+        send(node, msg)
 
         %{
           state
@@ -102,12 +158,18 @@ defmodule MeasureStatistics do
       else
         writing_value = last_value + 10
 
-        msg = %ClientRequest.Get{
+        msg = %ClientRequest.Put{
           nonce: nonce,
           key: key,
           value: writing_value,
           context: context
         }
+
+        Logger.warn(
+          "Sending: #{inspect(msg, pretty: true)} to #{inspect(node)}"
+        )
+
+        send(node, msg)
 
         %{
           state
@@ -120,14 +182,15 @@ defmodule MeasureStatistics do
         }
       end
 
-    send(node, msg)
-
     # go over all recvd messages
     all_recvd_msgs = recv_all_msgs_in_mailbox()
+    Logger.critical("#{Enum.count(all_recvd_msgs)} messages received")
 
     state =
       for msg <- all_recvd_msgs, reduce: state do
         state_acc ->
+          Logger.warn("Received: #{inspect(msg, pretty: true)}")
+
           case msg do
             %ClientResponse.Get{
               nonce: nonce,
@@ -139,12 +202,22 @@ defmodule MeasureStatistics do
                  expected_value: expected_value,
                  msg: msg,
                  context_idx: context_idx
-               }, new_pending_gets} = Map.pop!(state.pending_gets, nonce)
-               state_acc = %{state_acc | pending_gets: new_pending_gets}
+               }, new_pending_gets} = Map.pop!(state_acc.pending_gets, nonce)
 
-               if success == false do
-                 %{state_acc | num_requests_failed: state.num_requests_failed + 1}
-               else
+              state_acc = %{state_acc | pending_gets: new_pending_gets}
+
+              if success == false do
+                %{
+                  state_acc
+                  | num_requests_failed: state_acc.num_requests_failed + 1
+                }
+              else
+                # update context at context_idx
+                updated_contexts =
+                  List.update_at(state_acc.contexts, context_idx, fn _ctx ->
+                    context
+                  end)
+
                 inconsistency? = Enum.count(values) > 1
                 # NOTE: We assume the following to NOT be a stale read:
                 #   write 10
@@ -152,26 +225,100 @@ defmodule MeasureStatistics do
                 #   write 30
                 #   read
                 #   write 40
-                #   * get read response values = [10, 30] while expecting 30
-                stale_read? = Enum.all?(values, fn recvd_value ->
-                  recvd_value < expected_value
-                end)
+                #   * get read response values = [10, 40] while expecting 30
+                stale_read? =
+                  Enum.all?(
+                    values,
+                    fn recvd_value -> recvd_value < expected_value end
+                  )
 
-                # TODO
-                # %{state_acc | num_requests_succ }
-               end
+                if stale_read? do
+                  Logger.error(
+                    "Stale read - For key #{inspect(msg.key)}, expected: #{
+                      inspect(expected_value)
+                    }, got: #{inspect(values, as_charlist: false)}"
+                  )
+
+                  raise "Stale read!"
+                end
+
+                %{
+                  state_acc
+                  | num_requests_succeeded:
+                      state_acc.num_requests_succeeded + 1,
+                    num_inconsistencies:
+                      state_acc.num_inconsistencies +
+                        if(inconsistency?, do: 1, else: 0),
+                    num_stale_reads:
+                      state_acc.num_stale_reads +
+                        if(stale_read?, do: 1, else: 0),
+                    contexts: updated_contexts
+                }
+              end
 
             %ClientResponse.Put{
               nonce: nonce,
               success: success,
-              values: values,
               context: context
             } ->
-              state_acc
+              {%{
+                 writing_value: writing_value,
+                 msg: msg,
+                 context_idx: context_idx
+               }, new_pending_puts} = Map.pop!(state_acc.pending_puts, nonce)
+
+              state_acc = %{state_acc | pending_puts: new_pending_puts}
+
+              if success == false do
+                %{
+                  state_acc
+                  | num_requests_failed: state_acc.num_requests_failed + 1
+                }
+              else
+                # update context at context_idx
+                updated_contexts =
+                  List.update_at(state_acc.contexts, context_idx, fn _ctx ->
+                    context
+                  end)
+
+                # potentially update last_written
+                update_last_written =
+                  if not VectorClock.before?(
+                       msg.context.version,
+                       context.version
+                     ) do
+                    # if the version we sent is concurrent with the version we got back
+                    # (or even *after*,but that should not be possible)
+                    # then we know the value has been persisted
+                    # Logger.critical("Updating last_written[#{inspect key}] = max(#{inspect writing_value}, &1) since VectorClock.compare(msg.context.version, context) = VectorClock.compare(msg.context.version, context)")
+                    Map.update!(
+                      state_acc.last_written,
+                      msg.key,
+                      &max(writing_value, &1)
+                    )
+                  else
+                    state_acc.last_written
+                  end
+
+                %{
+                  state_acc
+                  | num_requests_succeeded:
+                      state_acc.num_requests_succeeded + 1,
+                    contexts: updated_contexts,
+                    last_written: update_last_written
+                }
+              end
           end
       end
 
-    # TODO Wait for next request timeout
+    # Wait for next request timeout
+    next_request_timeout =
+      Enum.random(state.min_request_interval..state.max_request_interval)
+
+    receive do
+    after
+      next_request_timeout -> true
+    end
 
     # send client requests to nodes
     # receive responses
@@ -186,7 +333,7 @@ defmodule MeasureStatistics do
   @doc """
   Receive all responses except for simulation finish msg.
   """
-  def recv_all_msgs_in_mailbox(accumulated) do
+  def recv_all_msgs_in_mailbox() do
     receive do
       msg when msg != :measure_finish ->
         [msg | recv_all_msgs_in_mailbox()]
