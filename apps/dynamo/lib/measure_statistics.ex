@@ -190,6 +190,7 @@ defmodule MeasureStatistics do
           state
           | pending_puts:
               Map.put(state.pending_puts, nonce, %{
+                node: node,
                 msg: msg,
                 context_idx: context_idx
               })
@@ -276,6 +277,7 @@ defmodule MeasureStatistics do
             context: context
           } ->
             {%{
+               node: node,
                msg: msg,
                context_idx: context_idx
              }, new_pending_puts} = Map.pop!(state_acc.pending_puts, nonce)
@@ -297,7 +299,7 @@ defmodule MeasureStatistics do
               # potentially update last_written
               update_last_written =
                 if not VectorClock.before?(
-                     msg.context.version,
+                     VectorClock.tick(msg.context.version, node),
                      context.version
                    ) do
                   # if the version we sent is concurrent with the version we got back
