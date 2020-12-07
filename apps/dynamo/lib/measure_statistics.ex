@@ -27,10 +27,7 @@ defmodule MeasureStatistics do
 
     # -- measuring parameters --
     # requests per second
-    # fixed_request_rate = 100
-    # fixed_request_rate
     max_request_rate = 500
-    # fixed_request_rate
     min_request_rate = 200
     num_clients = 5
 
@@ -190,7 +187,6 @@ defmodule MeasureStatistics do
           state
           | pending_puts:
               Map.put(state.pending_puts, nonce, %{
-                node: node,
                 msg: msg,
                 context_idx: context_idx
               })
@@ -274,10 +270,10 @@ defmodule MeasureStatistics do
           %ClientResponse.Put{
             nonce: nonce,
             success: success,
+            values: resp_values,
             context: context
           } ->
             {%{
-               node: node,
                msg: msg,
                context_idx: context_idx
              }, new_pending_puts} = Map.pop!(state_acc.pending_puts, nonce)
@@ -298,10 +294,7 @@ defmodule MeasureStatistics do
 
               # potentially update last_written
               update_last_written =
-                if not VectorClock.before?(
-                     VectorClock.tick(msg.context.version, node),
-                     context.version
-                   ) do
+                if msg.value in resp_values do
                   # if the version we sent is concurrent with the version we got back
                   # (or even *after*,but that should not be possible)
                   # then we know the value has been persisted
