@@ -1272,4 +1272,22 @@ defmodule DynamoNodeTest do
 
     assert {[49], _context} = Map.get(pref_2_state.store, :foo)
   end
+
+  test "{values, context} pairs are correctly merged" do
+    left = {[20], %Context{hint: nil, version: %{:node_6 => 2, :node_8 => 1}}}
+
+    right = {[30], %Context{hint: nil, version: %{:node_4 => 1, :node_7 => 2}}}
+
+    assert DynamoNode.merge_values(left, right) ==
+             {[20, 30],
+              %Context{
+                hint: nil,
+                version: %{
+                  :node_4 => 1,
+                  :node_7 => 2,
+                  :node_6 => 2,
+                  :node_8 => 1
+                }
+              }}
+  end
 end
