@@ -202,115 +202,116 @@ defmodule MeasureStatistics do
   end
 
   def handle_recvd_msg(state, msg) do
-    case msg do
-      %ClientResponse.Get{
-        nonce: nonce,
-        success: success,
-        values: values,
-        context: context
-      } ->
-        {%{
-           expected_value: expected_value,
-           msg: msg,
-           context_idx: context_idx
-         }, new_pending_gets} = Map.pop!(state.pending_gets, nonce)
+    pending_map =
+      case msg do
+        %ClientResponse.Get{} -> state.pending_gets
+        %ClientResponse.Put{} -> state.pending_puts
+      end
 
-        state = %{state | pending_gets: new_pending_gets}
+    if not Map.has_key?(pending_map, msg.nonce) do
+      # we're receiving a duplicate response, ignore
+      state
+    else
+      case msg do
+        %ClientResponse.Get{
+          nonce: nonce,
+          success: success,
+          values: values,
+          context: context
+        } ->
+          {%{
+             expected_value: expected_value,
+             msg: _msg,
+             context_idx: context_idx
+           }, new_pending_gets} = Map.pop!(state.pending_gets, nonce)
 
-        if success == false do
-          %{
-            state
-            | num_requests_failed: state.num_requests_failed + 1
-          }
-        else
-          # update context at context_idx
-          updated_contexts =
-            List.update_at(state.contexts, context_idx, fn _ctx ->
-              context
-            end)
+          state = %{state | pending_gets: new_pending_gets}
 
-          inconsistency? = Enum.count(values) > 1
-          # NOTE: We assume the following to NOT be a stale read:
-          #   write 10
-          #   write 20
-          #   write 30
-          #   read
-          #   write 40
-          #   * get read response values = [10, 40] while expecting 30
-          stale_read? =
-            Enum.all?(
-              values,
-              fn recvd_value -> recvd_value < expected_value end
-            )
+          if success == false do
+            %{
+              state
+              | num_requests_failed: state.num_requests_failed + 1
+            }
+          else
+            # update context at context_idx
+            updated_contexts =
+              List.update_at(state.contexts, context_idx, fn _ctx ->
+                context
+              end)
 
-          if stale_read? do
-            Logger.error(
-              "Stale read - For key #{inspect(msg.key)}, expected: #{
-                inspect(expected_value)
-              }, got: #{inspect(values, as_charlist: false)}"
-            )
+            inconsistency? = Enum.count(values) > 1
+            # NOTE: We assume the following to NOT be a stale read:
+            #   write 10
+            #   write 20
+            #   write 30
+            #   read
+            #   write 40
+            #   * get read response values = [10, 40] while expecting 30
+            stale_read? =
+              Enum.all?(
+                values,
+                fn recvd_value -> recvd_value < expected_value end
+              )
 
-            raise "Stale read!"
+            %{
+              state
+              | num_requests_succeeded: state.num_requests_succeeded + 1,
+                num_inconsistencies:
+                  state.num_inconsistencies + if(inconsistency?, do: 1, else: 0),
+                num_stale_reads:
+                  state.num_stale_reads + if(stale_read?, do: 1, else: 0),
+                contexts: updated_contexts
+            }
           end
 
-          %{
-            state
-            | num_requests_succeeded: state.num_requests_succeeded + 1,
-              num_inconsistencies:
-                state.num_inconsistencies + if(inconsistency?, do: 1, else: 0),
-              num_stale_reads:
-                state.num_stale_reads + if(stale_read?, do: 1, else: 0),
-              contexts: updated_contexts
-          }
-        end
+        %ClientResponse.Put{
+          nonce: nonce,
+          success: success,
+          values: resp_values,
+          context: context
+        } ->
+          {%{
+             msg: msg,
+             context_idx: context_idx
+           }, new_pending_puts} = Map.pop!(state.pending_puts, nonce)
 
-      %ClientResponse.Put{
-        nonce: nonce,
-        success: success,
-        values: resp_values,
-        context: context
-      } ->
-        {%{
-           msg: msg,
-           context_idx: context_idx
-         }, new_pending_puts} = Map.pop!(state.pending_puts, nonce)
+          state = %{state | pending_puts: new_pending_puts}
 
-        state = %{state | pending_puts: new_pending_puts}
+          if success == false do
+            %{
+              state
+              | num_requests_failed: state.num_requests_failed + 1
+            }
+          else
+            # update context at context_idx
+            updated_contexts =
+              List.update_at(state.contexts, context_idx, fn _ctx ->
+                context
+              end)
 
-        if success == false do
-          %{
-            state
-            | num_requests_failed: state.num_requests_failed + 1
-          }
-        else
-          # update context at context_idx
-          updated_contexts =
-            List.update_at(state.contexts, context_idx, fn _ctx ->
-              context
-            end)
+            # potentially update last_written
+            update_last_written =
+              if msg.value in resp_values do
+                # if the version we sent is concurrent with the version we got back
+                # (or even *after*,but that should not be possible)
+                # then we know the value has been persisted
+                Map.update!(
+                  state.last_written,
+                  msg.key,
+                  &max(msg.value, &1)
+                )
+              else
+                state.last_written
+              end
 
-          # potentially update last_written
-          update_last_written =
-            if msg.value in resp_values do
-              # if the version we sent is concurrent with the version we got back
-              # (or even *after*,but that should not be possible)
-              # then we know the value has been persisted
-              Map.update!(
-                state.last_written,
-                msg.key,
-                &max(msg.value, &1)
-              )
-            else
-              state.last_written
-            end
-
-          %{
-            state
-            | num_requests_succeeded: state.num_requests_succeeded + 1,
-              contexts: updated_contexts,
-              last_written: update_last_written
-          }
-        end
+            %{
+              state
+              | num_requests_succeeded: state.num_requests_succeeded + 1,
+                contexts: updated_contexts,
+                last_written: update_last_written
+            }
+          end
+      end
     end
   end
 
