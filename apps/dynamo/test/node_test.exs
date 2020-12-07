@@ -27,6 +27,9 @@ defmodule DynamoNodeTest do
     # (needs to implement String.chars, and pid doesn't)
     Process.register(self(), :test_proc)
 
+    # we mark the test proc as unfuzzable
+    Emulation.mark_unfuzzable()
+
     :ok
   end
 
