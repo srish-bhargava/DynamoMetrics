@@ -1065,6 +1065,10 @@ defmodule DynamoNode do
     # write to own store
     state = put(state, key, [value], context)
 
+    # we tell the client the final context, which should indicate to them whether
+    # their request succeeds or not (based on Context.compare)
+    {_values, resp_context} = Map.get(state.store, key)
+
     # don't send put request to self
     to_request =
       get_alive_preference_list_with_intended(state, key)
@@ -1091,7 +1095,7 @@ defmodule DynamoNode do
       send(client, %ClientResponse.Put{
         nonce: nonce,
         success: true,
-        context: context
+        context: resp_context
       })
 
       state
@@ -1119,7 +1123,7 @@ defmodule DynamoNode do
               client: client,
               key: key,
               value: value,
-              context: context,
+              context: resp_context,
               responses: MapSet.new(),
               requested: Map.new(to_request),
               last_requested_index: last_requested_index
