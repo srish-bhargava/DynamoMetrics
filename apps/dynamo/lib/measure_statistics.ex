@@ -8,6 +8,7 @@ defmodule MeasureStatistics do
 
   def measure(duration) do
     Emulation.init()
+    Emulation.append_fuzzers([Fuzzers.delay(1.0), Fuzzers.drop(0.05)])
 
     # ------------------------
     # -- cluster parameters --
