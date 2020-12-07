@@ -10,7 +10,7 @@ defmodule Context do
   end
 
   def compare(ctx1, ctx2) do
-    VectorClock.compare(ctx1, ctx2)
+    VectorClock.compare(ctx1.version, ctx2.version)
   end
 
   def combine(ctx1, ctx2) do
