@@ -11,7 +11,7 @@ import Config
 
 config :logger,
   backends: [:console],
-  level: :debug,
+  level: :critical,
   compile_time_purge_matching: [
     [application: :emulation]
   ]

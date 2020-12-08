@@ -13,10 +13,15 @@ defmodule MeasureStatistics do
     mean_delay = 1.0
     drop_rate = 0.05
 
+    mean_time_to_fail = 20_000
+    mean_time_to_recover = 1_000
+
     Emulation.append_fuzzers([
       Fuzzers.delay(mean_delay),
       Fuzzers.drop(drop_rate)
     ])
+
+    {:ok, crash_fuzzer} = CrashFuzzer.start()
 
     # ------------------------
     # -- cluster parameters --
@@ -59,17 +64,25 @@ defmodule MeasureStatistics do
     min_request_interval = ceil(1000 / max_request_rate)
     max_request_interval = floor(1000 / min_request_rate)
 
-    Cluster.start(
-      data,
-      nodes,
-      n,
-      r,
-      w,
-      coordinator_timeout,
-      total_redirect_timeout,
-      request_timeout,
-      alive_check_interval,
-      replica_sync_interval
+    pids =
+      Cluster.start(
+        data,
+        nodes,
+        n,
+        r,
+        w,
+        coordinator_timeout,
+        total_redirect_timeout,
+        request_timeout,
+        alive_check_interval,
+        replica_sync_interval
+      )
+
+    CrashFuzzer.enable(
+      crash_fuzzer,
+      mean_time_to_fail,
+      mean_time_to_recover,
+      pids
     )
 
     # initialize state
@@ -119,6 +132,8 @@ defmodule MeasureStatistics do
     IO.puts("Request rate:    #{min_request_rate}-#{max_request_rate}/s")
     IO.puts("Drop rate:       #{drop_rate * 100}%")
     IO.puts("Mean delay:      #{mean_delay} s")
+    IO.puts("Mean TT fail:    #{mean_time_to_fail} s")
+    IO.puts("Mean TT recover: #{mean_time_to_recover} s")
     IO.puts("----------------------------")
     IO.puts("Total requests:  #{total_requests}")
     IO.puts("Availability:    #{availability_percent}%")
@@ -332,7 +347,7 @@ defmodule MeasureStatistics do
   def handle_all_recvd_msgs(state) do
     # go over all recvd messages
     all_recvd_msgs = recv_all_msgs_in_mailbox()
-    Logger.critical("#{Enum.count(all_recvd_msgs)} messages received")
+    Logger.warn("#{Enum.count(all_recvd_msgs)} messages received")
 
     for msg <- all_recvd_msgs, reduce: state do
       state_acc ->

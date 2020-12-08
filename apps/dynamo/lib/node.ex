@@ -378,6 +378,7 @@ defmodule DynamoNode do
       # crash
       {_from, :crash} = msg ->
         Logger.info("Received #{inspect(msg)}")
+        Logger.critical("Crashed")
         state = crash(state)
         listener(state)
 
@@ -1279,6 +1280,7 @@ defmodule DynamoNode do
     receive do
       {_from, :recover} = msg ->
         Logger.info("Received #{inspect(msg)}")
+        Logger.critical("Recovered")
 
       other_msg ->
         Logger.debug("Dead, ignoring #{inspect(other_msg)}")
