@@ -39,7 +39,7 @@ defmodule Cluster do
         alive_check_interval,
         replica_sync_interval
       ) do
-    Enum.each(nodes, fn node ->
+    for node <- nodes do
       spawn(node, fn ->
         DynamoNode.start(
           node,
@@ -55,6 +55,6 @@ defmodule Cluster do
           replica_sync_interval
         )
       end)
-    end)
+    end
   end
 end
