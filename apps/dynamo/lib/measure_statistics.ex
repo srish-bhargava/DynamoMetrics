@@ -1,3 +1,30 @@
+defmodule Params do
+  use TypedStruct
+
+  typedstruct do
+    field :duration, pos_integer, enforce: true
+    field :request_rate, {pos_integer, pos_integer}, enforce: true
+    field :drop_rate, pos_integer, enforce: true
+    field :mean_delay, pos_integer, enforce: true
+    field :tt_fail, pos_integer, enforce: true
+    field :tt_recover, pos_integer, default: 1000
+
+    field :cluster_size, pos_integer, default: 100
+    field :num_keys, pos_integer, default: 100
+    field :num_clients, pos_integer, default: 5
+
+    field :n, pos_integer, default: 3
+    field :r, pos_integer, default: 2
+    field :w, pos_integer, default: 2
+
+    field :coordinator_timeout, pos_integer, default: 300
+    field :total_redirect_timeout, pos_integer, default: 300
+    field :request_timeout, pos_integer, default: 700
+    field :alive_check_interval, pos_integer, default: 200
+    field :replica_sync_interval, pos_integer, default: 500
+  end
+end
+
 defmodule MeasureStatistics do
   import Emulation, only: [send: 2]
 
@@ -6,82 +33,54 @@ defmodule MeasureStatistics do
 
   require Logger
 
-  def measure(duration) do
+  def measure(params) do
     Emulation.init()
 
-    # failure parameters
-    mean_delay = 1.0
-    drop_rate = 0.05
-
-    mean_time_to_fail = 20_000
-    mean_time_to_recover = 1_000
-
     Emulation.append_fuzzers([
-      Fuzzers.delay(mean_delay),
-      Fuzzers.drop(drop_rate)
+      Fuzzers.delay(params.mean_delay / 1000),
+      Fuzzers.drop(params.drop_rate)
     ])
 
     {:ok, crash_fuzzer} = CrashFuzzer.start()
 
-    # ------------------------
-    # -- cluster parameters --
-    # ------------------------
-
-    cluster_size = 10
-    num_keys = 100
-    # common values of (n,r,w) acc. to Dynamo paper
-    {n, r, w} = {3, 2, 2}
-
-    # timeouts
-    coordinator_timeout = 300
-    total_redirect_timeout = 300
-    request_timeout = 700
-    alive_check_interval = 200
-    replica_sync_interval = 500
-
-    # -- measuring parameters --
-    # requests per second
-    max_request_rate = 500
-    min_request_rate = 200
-    num_clients = 5
-
     # make up values based on params
     data =
-      for key <- 1..num_keys, into: %{} do
+      for key <- 1..params.num_keys, into: %{} do
         {key, 10}
       end
 
     nodes =
-      for node_num <- 1..cluster_size, into: [] do
+      for node_num <- 1..params.cluster_size, into: [] do
         "node-#{node_num}"
       end
 
     contexts =
-      for _client <- 1..num_clients, into: [] do
+      for _client <- 1..params.num_clients, into: [] do
         %Context{version: VectorClock.new()}
       end
 
-    min_request_interval = ceil(1000 / max_request_rate)
-    max_request_interval = floor(1000 / min_request_rate)
+    {min_request_rate, max_request_rate} = params.request_rate
+    min_request_interval = ceil(1000 / min_request_rate)
+    max_request_interval = floor(1000 / max_request_rate)
 
     pids =
       Cluster.start(
         data,
         nodes,
-        n,
-        r,
-        w,
-        coordinator_timeout,
-        total_redirect_timeout,
-        request_timeout,
-        alive_check_interval,
-        replica_sync_interval
+        params.n,
+        params.r,
+        params.w,
+        params.coordinator_timeout,
+        params.total_redirect_timeout,
+        params.request_timeout,
+        params.alive_check_interval,
+        params.replica_sync_interval
       )
 
     CrashFuzzer.enable(
       crash_fuzzer,
-      mean_time_to_fail,
-      mean_time_to_recover,
+      params.tt_fail,
+      params.tt_recover,
       pids
     )
 
@@ -104,7 +103,7 @@ defmodule MeasureStatistics do
     # We cannot use Emulation.timer here here because this
     # process has not been spawned by Emulation,
     # so we use Process.send_after instead
-    Process.send_after(self(), :measure_finish, duration)
+    Process.send_after(self(), :measure_finish, params.duration)
 
     state = measure_loop(state)
 
@@ -120,7 +119,7 @@ defmodule MeasureStatistics do
       Float.round(state.num_inconsistencies * 100 / total_requests, 2)
 
     stale_reads_percent =
-      Float.round(state.num_stale_reads * 100 / total_requests, 2)
+      Float.round(state.num_stale_reads * 100 / total_requests, 4)
 
     Logger.flush()
 
@@ -128,12 +127,12 @@ defmodule MeasureStatistics do
     IO.puts("----------------------------")
     IO.puts("    Measurements finished   ")
     IO.puts("----------------------------")
-    IO.puts("Duration:        #{duration / 1000} s")
+    IO.puts("Duration:        #{params.duration / 1000} s")
     IO.puts("Request rate:    #{min_request_rate}-#{max_request_rate}/s")
-    IO.puts("Drop rate:       #{drop_rate * 100}%")
-    IO.puts("Mean delay:      #{mean_delay} s")
-    IO.puts("Mean TT fail:    #{mean_time_to_fail} s")
-    IO.puts("Mean TT recover: #{mean_time_to_recover} s")
+    IO.puts("Drop rate:       #{params.drop_rate * 100}%")
+    IO.puts("Mean delay:      #{params.mean_delay / 1000} s")
+    IO.puts("Mean TT fail:    #{params.tt_fail / 1000} s")
+    IO.puts("Mean TT recover: #{params.tt_recover / 1000} s")
     IO.puts("----------------------------")
     IO.puts("Total requests:  #{total_requests}")
     IO.puts("Availability:    #{availability_percent}%")
