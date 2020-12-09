@@ -44,7 +44,9 @@ defmodule MeasureStatistics do
     result = measure(params)
     Process.group_leader(self(), original_dev)
 
-    IO.puts(inspect(result))
+    IO.puts(
+      "#{result.availability}, #{result.inconsistency}, #{result.stale_reads}"
+    )
   end
 
   def measure(params) do
@@ -157,7 +159,7 @@ defmodule MeasureStatistics do
     %{
       availability: availability_percent,
       inconsistency: inconsistency_percent,
-      stale: stale_reads_percent
+      stale_reads: stale_reads_percent
     }
   end
 
