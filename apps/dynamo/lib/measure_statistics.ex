@@ -33,6 +33,20 @@ defmodule MeasureStatistics do
 
   require Logger
 
+  def measure_output_csv(params) do
+    # prevent all output
+    Logger.remove_backend(:console)
+
+    {:ok, dev} = StringIO.open("")
+
+    original_dev = Process.group_leader()
+    Process.group_leader(self(), dev)
+    result = measure(params)
+    Process.group_leader(self(), original_dev)
+
+    IO.puts(inspect(result))
+  end
+
   def measure(params) do
     Emulation.init()
     Emulation.mark_unfuzzable()
@@ -139,6 +153,12 @@ defmodule MeasureStatistics do
     IO.puts("Availability:    #{availability_percent}%")
     IO.puts("Inconsistencies: #{inconsistency_percent}%")
     IO.puts("Stale reads:     #{stale_reads_percent}%")
+
+    %{
+      availability: availability_percent,
+      inconsistency: inconsistency_percent,
+      stale: stale_reads_percent
+    }
   end
 
   def measure_loop(state) do
