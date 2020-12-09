@@ -35,6 +35,7 @@ defmodule MeasureStatistics do
 
   def measure(params) do
     Emulation.init()
+    Emulation.mark_unfuzzable()
 
     Emulation.append_fuzzers([
       Fuzzers.delay(params.mean_delay / 1000),
