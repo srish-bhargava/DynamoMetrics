@@ -127,7 +127,8 @@ defmodule MeasureStatistics do
     Emulation.terminate()
 
     # calculate stats
-    total_requests = state.num_requests_failed + state.num_requests_succeeded
+    total_requests =
+      max(1, state.num_requests_failed + state.num_requests_succeeded)
 
     availability_percent =
       Float.round(state.num_requests_succeeded * 100 / total_requests, 2)
