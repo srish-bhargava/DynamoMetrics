@@ -2,6 +2,8 @@
 
 import os
 import asyncio
+import matplotlib.pyplot as plt
+from tqdm import tqdm
 
 
 def format_params(params):
@@ -10,35 +12,42 @@ def format_params(params):
     return f"MeasureStatistics.measure_output_csv({param_str})"
 
 
-async def make_measurement(params):
-    cmd = f"mix run -e '{format_params(params)}'"
-    proc = await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.PIPE)
+async def make_measurement(params, progress=None):
+    async with measurement_semaphore:
+        cmd = f"mix run -e '{format_params(params)}'"
+        proc = await asyncio.create_subprocess_shell(
+            cmd, stdout=asyncio.subprocess.PIPE
+        )
 
-    stdout, _stderr = await proc.communicate()
-    output = stdout.decode()
+        stdout, _stderr = await proc.communicate()
+        output = stdout.decode()
 
-    parsed_output = [float(elem) for elem in output.split(", ")]
-    return parsed_output
+        parsed_output = [float(elem) for elem in output.split(", ")]
+
+        if progress is not None:
+            progress.update()
+
+        return parsed_output
 
 
-async def make_measurement_average(params, reps):
+async def make_measurement_average(params, reps, progress=None):
     if reps == 1:
-        return await make_measurement(params)
-    results = await asyncio.gather(*(make_measurement(params) for _ in range(reps)))
-    averages = [round(sum(at_index) / len(at_index), 4) for at_index in zip(*results)]
+        return await make_measurement(params, progress=progress)
+    results = await asyncio.gather(
+        *(make_measurement(params, progress=progress) for _ in range(reps))
+    )
+    averages = [round(sum(field_vals) / reps, 4) for field_vals in zip(*results)]
     return averages
 
 
-async def analyse():
-    reps = 10
-
+async def plot(param_key, param_values, reps=1):
     standard_params = {
-        "duration": "10_000",
+        "duration": "30_000",
         # fuzzer params
         "request_rate": "{10, 20}",
-        "drop_rate": "0.05",
-        "mean_delay": "100",
-        "tt_fail": "20_000",
+        "drop_rate": "0.01",
+        "mean_delay": "50",
+        "tt_fail": "100_000",
         # test params
         "cluster_size": "20",
         "num_keys": "1000",
@@ -54,22 +63,46 @@ async def analyse():
         "replica_sync_interval": "200",
     }
 
-    more_clients_params = {**standard_params, "num_clients": "50"}
+    with tqdm(total=len(param_values) * reps) as progress:
+        results = await asyncio.gather(
+            *(
+                make_measurement_average(
+                    {**standard_params, param_key: str(param_value)},
+                    reps=reps,
+                    progress=progress,
+                )
+                for param_value in param_values
+            )
+        )
 
-    experiments = {"standard": standard_params, "more clients": more_clients_params}
+    plt.figure(1)
+    plt.suptitle(f"Against {param_key}")
 
-    async def run_experiment(experiment, reps=1):
-        name, params = experiment
-        result = await make_measurement_average(params, reps=reps)
-        return (name, result)
+    for idx, item in enumerate(
+        zip(["availability", "inconsistency", "stale reads"], *results)
+    ):
+        (yname, *ys) = item
+        plt.subplot(1, 3, idx + 1)
+        plt.xlabel(param_key)
+        plt.ylabel(yname)
+        plt.plot(param_values, list(ys))
+        if yname == "availability":
+            plt.ylim(bottom=0, top=105)
+        elif yname == "inconsistency":
+            plt.ylim(bottom=0, top=50)
+        elif yname == "stale reads":
+            plt.ylim(bottom=0, top=1)
 
-    results = await asyncio.gather(
-        *(run_experiment(experiment, reps=reps) for experiment in experiments.items())
-    )
-    return {name: result for (name, result) in results}
+    plt.show()
+
+
+async def main():
+    global measurement_semaphore
+    measurement_semaphore = asyncio.Semaphore(50)
+    # await plot("duration", [i * 1000 for i in range(10, 21)], reps=5)
+    await plot("drop_rate", [i * 0.01 for i in range(1, 3)], reps=1)
 
 
 if __name__ == "__main__":
     os.chdir(os.path.join(os.path.dirname(__file__), os.pardir))
-    result = asyncio.run(analyse())
-    print(result)
+    asyncio.run(main())
