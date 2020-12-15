@@ -4,6 +4,7 @@ import os
 import asyncio
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+import math
 
 
 def format_params(params):
@@ -36,18 +37,21 @@ async def make_measurement_average(params, reps, progress=None):
     results = await asyncio.gather(
         *(make_measurement(params, progress=progress) for _ in range(reps))
     )
-    averages = [round(sum(field_vals) / reps, 4) for field_vals in zip(*results)]
+    averages = [
+        round(math.sqrt(sum(val * val for val in field_vals) / reps), 4)
+        for field_vals in zip(*results)
+    ]
     return averages
 
 
-async def plot(param_key, param_values, reps=1):
+async def plot(param_key, param_values, reps=1, overrides={}):
     standard_params = {
-        "duration": "30_000",
+        "duration": "10_000",
         # fuzzer params
         "request_rate": "{10, 20}",
         "drop_rate": "0.01",
         "mean_delay": "50",
-        "tt_fail": "100_000",
+        "tt_fail": "10_000_000",
         # test params
         "cluster_size": "20",
         "num_keys": "1000",
@@ -61,13 +65,22 @@ async def plot(param_key, param_values, reps=1):
         "total_redirect_timeout": "300",
         "alive_check_interval": "50",
         "replica_sync_interval": "200",
+        **overrides,
     }
+
+    def to_str(val):
+        if type(val) in [int, float]:
+            return str(val)
+        elif type(val) == tuple:
+            return "{" + ",".join(to_str(v) for v in val) + "}"
+        else:
+            raise ValueError(f"Unhandled type {type(val)} of {val}")
 
     with tqdm(total=len(param_values) * reps) as progress:
         results = await asyncio.gather(
             *(
                 make_measurement_average(
-                    {**standard_params, param_key: str(param_value)},
+                    {**standard_params, param_key: to_str(param_value)},
                     reps=reps,
                     progress=progress,
                 )
@@ -100,7 +113,14 @@ async def main():
     global measurement_semaphore
     measurement_semaphore = asyncio.Semaphore(50)
     # await plot("duration", [i * 1000 for i in range(10, 21)], reps=5)
-    await plot("drop_rate", [i * 0.01 for i in range(1, 3)], reps=1)
+    # await plot("drop_rate", [i * 0.01 for i in range(1, 21)], reps=10)
+    # await plot("tt_fail", [10 ** 4 / i for i in range(1, 100)], reps=10)
+    await plot(
+        "request_rate",
+        [(i, i) for i in [10, 20, 40, 80, 160, 320, 640, 1280, 2560, 5120, 10240]],
+        reps=50,
+        overrides={"duration": "5000"},
+    )
 
 
 if __name__ == "__main__":
